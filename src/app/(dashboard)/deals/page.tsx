@@ -131,7 +131,7 @@ export default function DealsPage() {
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5">
                       Invoice: <span className="font-mono font-semibold text-slate-700">{deal.invoice_number || 'INV-DRAFT'}</span>
-                      {deal.expected_payout_date && <span> • Due: {formatDate(deal.expected_payout_date)}</span>}
+                      {deal.expected_payout_date && <span suppressHydrationWarning> • Due: {formatDate(deal.expected_payout_date)}</span>}
                     </div>
                   </div>
 
@@ -360,7 +360,7 @@ export default function DealsPage() {
                 <div className="text-right">
                   <span className="text-base font-black text-teal-800 uppercase tracking-wider block">Tax Invoice</span>
                   <div className="text-xs font-bold text-slate-900 mt-1">Invoice No: {invoiceDeal.invoice_number}</div>
-                  <div className="text-slate-500">Date: {formatDate(invoiceDeal.created_at)}</div>
+                  <div suppressHydrationWarning className="text-slate-500">Date: {formatDate(invoiceDeal.created_at)}</div>
                   <div className="text-slate-500">Status: <strong className="uppercase text-emerald-700">{invoiceDeal.status}</strong></div>
                 </div>
               </div>

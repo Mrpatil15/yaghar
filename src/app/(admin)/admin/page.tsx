@@ -217,7 +217,7 @@ export default function SuperAdminPage() {
                         {t.subscription_status}
                       </span>
                     </td>
-                    <td className="p-3 text-slate-400">
+                    <td suppressHydrationWarning className="p-3 text-slate-400">
                       {formatDate(t.trial_ends_at)}
                     </td>
                     <td className="p-3 text-right">

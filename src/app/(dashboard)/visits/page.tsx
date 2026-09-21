@@ -137,7 +137,7 @@ export default function SiteVisitsPage() {
 
                       <div className="text-xs text-teal-800 font-bold flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-teal-600" />
-                        <span>{formatDateTime(visit.scheduled_at)}</span>
+                        <span suppressHydrationWarning>{formatDateTime(visit.scheduled_at)}</span>
                       </div>
 
                       {visit.outcome_notes && (

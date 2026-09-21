@@ -74,7 +74,7 @@ export default function BillingPage() {
 
             <div className="text-left sm:text-right">
               <span className="text-xs text-slate-400 block">Renews / Expires:</span>
-              <span className="font-bold text-xs text-slate-800">{formatDate(workspace.trial_ends_at)}</span>
+              <span suppressHydrationWarning className="font-bold text-xs text-slate-800">{formatDate(workspace.trial_ends_at)}</span>
             </div>
           </div>
 

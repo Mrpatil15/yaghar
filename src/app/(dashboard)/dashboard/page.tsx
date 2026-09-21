@@ -171,7 +171,7 @@ export default function DashboardPage() {
                     <div>
                       <div className="font-bold text-xs text-slate-900">{lead?.name || 'Client'}</div>
                       <div className="text-[11px] text-slate-500">{prop?.title} ({prop?.locality})</div>
-                      <div className="text-[11px] text-teal-700 font-semibold mt-0.5">{formatDateTime(v.scheduled_at)}</div>
+                      <div suppressHydrationWarning className="text-[11px] text-teal-700 font-semibold mt-0.5">{formatDateTime(v.scheduled_at)}</div>
                     </div>
                     <Link
                       href="/visits"

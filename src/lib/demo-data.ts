@@ -326,20 +326,20 @@ export const INITIAL_VISITS: SiteVisit[] = [
     workspace_id: 'a0000000-0000-0000-0000-000000000001',
     lead_id: 'c0000000-0000-0000-0000-000000000001',
     property_id: 'b0000000-0000-0000-0000-000000000001',
-    scheduled_at: new Date(Date.now() + 1 * 86400000).toISOString(),
+    scheduled_at: '2026-09-22T11:30:00.000Z',
     status: 'scheduled',
     outcome_notes: 'Client confirmed for 11:30 AM. Meeting at Oberoi Sky City Clubhouse gate.',
-    created_at: new Date().toISOString(),
+    created_at: '2026-09-20T10:00:00.000Z',
   },
   {
     id: 'v0000000-0000-0000-0000-000000000002',
     workspace_id: 'a0000000-0000-0000-0000-000000000001',
     lead_id: 'c0000000-0000-0000-0000-000000000003',
     property_id: 'b0000000-0000-0000-0000-000000000003',
-    scheduled_at: new Date(Date.now() + 3 * 86400000).toISOString(),
+    scheduled_at: '2026-09-24T16:00:00.000Z',
     status: 'scheduled',
     outcome_notes: 'Weekend visit scheduled for Wakad sample flat tour.',
-    created_at: new Date().toISOString(),
+    created_at: '2026-09-20T11:00:00.000Z',
   }
 ];
 

@@ -173,7 +173,7 @@ export default function LeadDetailPage() {
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
               <span className="text-slate-400 block mb-1">Next Follow-Up</span>
-              <span className="font-bold text-slate-900 text-sm">
+              <span suppressHydrationWarning className="font-bold text-slate-900 text-sm">
                 {formatDate(lead.next_follow_up_at)}
               </span>
             </div>
