@@ -469,13 +469,13 @@ export default function LandingPage() {
                   {formatINR(additionalCommission)}
                 </div>
                 {/* Footnote constraint */}
-                <p className="text-[11px] text-slate-400 italic">
+                <p className="text-xs text-slate-200">
                   Illustrative estimate at a 2% brokerage rate. Actual results vary.
                 </p>
                 <div className="pt-2">
                   <Link
                     href="/signup"
-                    className="inline-flex items-center gap-2 px-6 py-2.5 min-h-[44px] rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-900 font-bold text-xs transition-colors focus-visible:ring-2 focus-visible:ring-teal-400"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 min-h-[44px] rounded-xl bg-teal-400 hover:bg-teal-300 text-slate-950 font-bold text-xs transition-colors focus-visible:ring-2 focus-visible:ring-teal-400"
                   >
                     <span>Claim Your Free Trial</span>
                     <ArrowRight className="w-3.5 h-3.5" />
@@ -493,7 +493,7 @@ export default function LandingPage() {
             <h2 className="text-2xl sm:text-4xl font-black text-slate-900">
               Simple plans that scale with your brokerage
             </h2>
-            <p className="text-xs sm:text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-slate-600">
               14 days free trial on all plans. Pay securely in INR via UPI, NetBanking or Credit Card.
             </p>
 
@@ -522,7 +522,7 @@ export default function LandingPage() {
                 }`}
               >
                 <span>Annual (2 Months Free)</span>
-                <span className="text-[10px] bg-amber-400 text-slate-900 px-1.5 py-0.5 rounded-md uppercase font-black">
+                <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded-md uppercase font-black">
                   Save 17%
                 </span>
               </button>
@@ -551,16 +551,16 @@ export default function LandingPage() {
                   <div className="space-y-4">
                     <div>
                       <h3 className="font-bold text-lg text-slate-900">{plan.name}</h3>
-                      <p className="text-xs text-slate-500 mt-0.5">{plan.tagline}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">{plan.tagline}</p>
                     </div>
 
                     <div className="pt-2">
                       <span className="text-3xl font-black text-slate-900 font-mono">
                         ₹ {monthlyDisplay.toLocaleString('en-IN')}
                       </span>
-                      <span className="text-xs text-slate-500"> / month</span>
+                      <span className="text-xs text-slate-600"> / month</span>
                       {isAnnual && (
-                        <div className="text-[11px] text-teal-700 font-semibold mt-0.5">
+                        <div className="text-[11px] text-teal-800 font-bold mt-0.5">
                           Billed annually (₹ {plan.priceYearlyINR.toLocaleString('en-IN')}/yr)
                         </div>
                       )}
@@ -575,11 +575,11 @@ export default function LandingPage() {
 
                         return (
                           <div key={i} className="flex items-start gap-2">
-                            <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
+                            <CheckCircle2 className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
                             <span className="leading-snug">
                               {feat}
                               {isComingSoon && (
-                                <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 inline-block align-middle">
+                                <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 inline-block align-middle">
                                   Coming soon
                                 </span>
                               )}
@@ -616,7 +616,7 @@ export default function LandingPage() {
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900">
               Frequently Asked Questions
             </h2>
-            <p className="text-xs sm:text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-slate-600">
               Everything you need to know about plans, compliance, and features.
             </p>
           </div>
@@ -639,7 +639,7 @@ export default function LandingPage() {
                   >
                     <span>{faq.q}</span>
                     <ChevronDown
-                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
+                      className={`w-4 h-4 text-slate-500 shrink-0 transition-transform duration-200 ${
                         isOpen ? 'rotate-180 text-teal-700' : ''
                       }`}
                     />
@@ -650,7 +650,7 @@ export default function LandingPage() {
                       id={`faq-answer-${idx}`}
                       role="region"
                       aria-labelledby={`faq-question-${idx}`}
-                      className="px-5 pb-5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3"
+                      className="px-5 pb-5 text-xs text-slate-700 leading-relaxed border-t border-slate-100 pt-3"
                     >
                       {faq.a}
                     </div>
@@ -671,10 +671,10 @@ export default function LandingPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {TESTIMONIALS.map(t => (
                 <div key={t.id} className="p-6 rounded-3xl bg-white border border-slate-200 shadow-xs space-y-3">
-                  <p className="text-xs text-slate-600 italic leading-relaxed">&ldquo;{t.quote}&rdquo;</p>
+                  <p className="text-xs text-slate-700 italic leading-relaxed">&ldquo;{t.quote}&rdquo;</p>
                   <div className="pt-2 border-t border-slate-100">
                     <div className="font-bold text-xs text-slate-900">{t.author}</div>
-                    <div className="text-[11px] text-slate-500">{t.agency} • {t.city}</div>
+                    <div className="text-[11px] text-slate-600">{t.agency} • {t.city}</div>
                   </div>
                 </div>
               ))}
@@ -725,18 +725,18 @@ export default function LandingPage() {
                 </div>
                 <div className="font-black text-lg tracking-tight">YAGHAR</div>
               </div>
-              <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
+              <p className="text-xs text-slate-300 max-w-sm leading-relaxed">
                 The Real Estate Operating System for independent consultants and small brokerages in India.
               </p>
-              <div className="pt-2 text-[11px] text-slate-500">
+              <div className="pt-2 text-[11px] text-slate-400">
                 MahaRERA &amp; Digital Personal Data Protection (DPDP) Act 2023 Compliant.
               </div>
             </div>
 
             {/* Column 2: Legal Links */}
             <div className="space-y-3">
-              <h4 className="font-bold text-xs text-white uppercase tracking-wider">Legal &amp; Policy</h4>
-              <ul className="space-y-2 text-xs text-slate-400">
+              <h3 className="font-bold text-xs text-white uppercase tracking-wider">Legal &amp; Policy</h3>
+              <ul className="space-y-2 text-xs text-slate-300">
                 <li>
                   <Link href="/terms" className="hover:text-teal-300 transition-colors focus-visible:ring-2 focus-visible:ring-teal-600 rounded">
                     Terms of Service
@@ -757,8 +757,8 @@ export default function LandingPage() {
 
             {/* Column 3: Contact & Support */}
             <div className="space-y-3">
-              <h4 className="font-bold text-xs text-white uppercase tracking-wider">Contact &amp; Support</h4>
-              <ul className="space-y-2.5 text-xs text-slate-400">
+              <h3 className="font-bold text-xs text-white uppercase tracking-wider">Contact &amp; Support</h3>
+              <ul className="space-y-2.5 text-xs text-slate-300">
                 <li>
                   <a
                     href={`mailto:${SUPPORT_EMAIL}`}
@@ -784,7 +784,7 @@ export default function LandingPage() {
           </div>
 
           {/* Bottom Copyright & Entity */}
-          <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
+          <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-400">
             <div>
               © {new Date().getFullYear()} {LEGAL_ENTITY_NAME}. All rights reserved.
             </div>
