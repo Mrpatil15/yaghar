@@ -6,7 +6,7 @@ import { Header } from '@/components/navigation/Header';
 import { useApp } from '@/context/AppContext';
 import { ListingType, PropertyType, PossessionStatus } from '@/types/database.types';
 import { formatINR } from '@/lib/formatters';
-import { ArrowLeft, Building2, MapPin, IndianRupee, ShieldCheck, Check, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Building2, MapPin, IndianRupee, ShieldCheck, Check, AlertCircle, Upload, Trash2, Image as ImageIcon } from 'lucide-react';
 import Link from 'next/link';
 
 const AMENITY_LIST = [
@@ -36,7 +36,35 @@ export default function NewPropertyPage() {
   const [description, setDescription] = useState('');
   const [locationPin, setLocationPin] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [uploadMode, setUploadMode] = useState<'upload' | 'url'>('upload');
+  const [imagePreview, setImagePreview] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file (PNG, JPG, WEBP).');
+      return;
+    }
+
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setImagePreview(result);
+      setImageUrl(result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setImageUrl('');
+    setImagePreview('');
+    setFileName('');
+  };
 
   const calculatedINR = priceInput ? parseFloat(priceInput) * 100000 : 0;
 
@@ -397,16 +425,104 @@ export default function NewPropertyPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Cover Photo URL
-              </label>
-              <input
-                type="url"
-                placeholder="https://images.unsplash.com/..."
-                value={imageUrl}
-                onChange={e => setImageUrl(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-600"
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Property Cover Photo
+                </label>
+                <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[11px] font-medium">
+                  <button
+                    type="button"
+                    onClick={() => setUploadMode('upload')}
+                    className={`px-2.5 py-1 rounded-md transition-all ${
+                      uploadMode === 'upload' 
+                        ? 'bg-white text-teal-800 shadow-xs font-semibold' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    📁 Upload from Device
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadMode('url')}
+                    className={`px-2.5 py-1 rounded-md transition-all ${
+                      uploadMode === 'url' 
+                        ? 'bg-white text-teal-800 shadow-xs font-semibold' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    🔗 Web URL
+                  </button>
+                </div>
+              </div>
+
+              {uploadMode === 'upload' ? (
+                <div>
+                  {!imagePreview ? (
+                    <label className="border-2 border-dashed border-slate-200 hover:border-teal-500 hover:bg-teal-50/30 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group">
+                      <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div className="text-center">
+                        <span className="text-xs font-bold text-teal-700 hover:underline">Click to browse your device / storage</span>
+                        <span className="text-xs text-slate-500"> or drag and drop</span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Supports JPG, PNG, WEBP, HEIC</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                  ) : (
+                    <div className="relative rounded-2xl border border-slate-200 overflow-hidden bg-slate-50 p-2.5 flex items-center gap-3">
+                      <img
+                        src={imagePreview}
+                        alt="Property Preview"
+                        className="w-20 h-20 rounded-xl object-cover border border-slate-200"
+                      />
+                      <div className="flex-1 min-w-0 text-xs">
+                        <p className="font-bold text-slate-800 truncate">{fileName || 'Uploaded Property Photo'}</p>
+                        <p className="text-[11px] text-emerald-700 font-semibold mt-0.5 flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Ready to publish with listing</span>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                        title="Remove image"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="url"
+                    placeholder="https://images.unsplash.com/..."
+                    value={imageUrl}
+                    onChange={e => {
+                      setImageUrl(e.target.value);
+                      setImagePreview(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  />
+                  {imageUrl && (
+                    <div className="relative rounded-xl border border-slate-200 overflow-hidden w-28 h-20 bg-slate-100">
+                      <img
+                        src={imageUrl}
+                        alt="URL preview"
+                        className="w-full h-full object-cover"
+                        onError={() => setImagePreview('')}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
