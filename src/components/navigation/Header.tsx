@@ -13,7 +13,7 @@ interface HeaderProps {
 }
 
 export function Header({ title, subtitle, onOpenAddLead, onOpenShareModal }: HeaderProps) {
-  const { workspace, leads } = useApp();
+  const { workspace, leads, dbStatus } = useApp();
 
   const dueFollowUps = leads.filter(l => {
     if (!l.next_follow_up_at || l.is_dead) return false;
@@ -25,15 +25,38 @@ export function Header({ title, subtitle, onOpenAddLead, onOpenShareModal }: Hea
     <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 py-3 md:px-8">
       <div className="flex items-center justify-between gap-4">
         {/* Title */}
-        <div>
-          <h1 className="text-lg md:text-xl font-bold text-slate-900 leading-tight">
-            {title}
-          </h1>
-          {subtitle && (
-            <p className="text-xs text-slate-500 hidden sm:block">
-              {subtitle}
-            </p>
-          )}
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-lg md:text-xl font-bold text-slate-900 leading-tight">
+              {title}
+            </h1>
+            {subtitle && (
+              <p className="text-xs text-slate-500 hidden sm:block">
+                {subtitle}
+              </p>
+            )}
+          </div>
+
+          <Link
+            href="/settings#database"
+            className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+              dbStatus === 'connected'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                : dbStatus === 'checking'
+                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+            }`}
+            title={dbStatus === 'connected' ? 'Connected to Supabase PostgreSQL' : 'Using Local Storage / Demo Mode (Click to configure)'}
+          >
+            <span className={`w-2 h-2 rounded-full ${
+              dbStatus === 'connected'
+                ? 'bg-emerald-500 animate-pulse'
+                : dbStatus === 'checking'
+                ? 'bg-amber-500 animate-pulse'
+                : 'bg-slate-400'
+            }`} />
+            <span>{dbStatus === 'connected' ? 'Cloud DB Active' : dbStatus === 'checking' ? 'Connecting DB...' : 'Local Demo DB'}</span>
+          </Link>
         </div>
 
         {/* Action buttons */}

@@ -10,6 +10,30 @@ import {
 } from '@/lib/demo-data';
 import { normalizeIndianPhone } from '@/lib/formatters';
 import { PLANS, PlanConfig } from '@/lib/plans';
+import { isSupabaseConfigured } from '@/lib/supabase/client';
+import { 
+  checkDbConnection, 
+  fetchWorkspaceFromDb, 
+  saveWorkspaceToDb,
+  fetchLeadsFromDb, 
+  insertLeadToDb, 
+  updateLeadInDb, 
+  deleteLeadFromDb,
+  fetchPropertiesFromDb, 
+  insertPropertyToDb, 
+  updatePropertyInDb, 
+  deletePropertyFromDb,
+  fetchDealsFromDb, 
+  insertDealToDb, 
+  updateDealInDb,
+  fetchVisitsFromDb, 
+  insertVisitToDb, 
+  updateVisitInDb,
+  fetchMicrositeFromDb, 
+  saveMicrositeToDb 
+} from '@/lib/supabase/db-service';
+
+export type DbStatus = 'checking' | 'connected' | 'demo';
 
 interface AppContextType {
   workspace: Workspace;
@@ -22,6 +46,9 @@ interface AppContextType {
   templates: Template[];
   microsite: Microsite;
   plan: PlanConfig;
+  dbStatus: DbStatus;
+  isDbConnected: boolean;
+  syncWithDatabase: () => Promise<void>;
   // Actions
   addLead: (lead: Omit<Lead, 'id' | 'workspace_id' | 'created_at' | 'updated_at' | 'is_dead'>) => { success: boolean; lead?: Lead; error?: string };
   updateLead: (id: string, updates: Partial<Lead>) => void;
@@ -49,6 +76,13 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'yaghar_state_v1';
 
+function generateId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [workspace, setWorkspaceState] = useState<Workspace>(INITIAL_WORKSPACE);
   const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
@@ -59,29 +93,108 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [templates, setTemplates] = useState<Template[]>(INITIAL_TEMPLATES);
   const [microsite, setMicrosite] = useState<Microsite>(INITIAL_MICROSITE);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [dbStatus, setDbStatus] = useState<DbStatus>('checking');
 
-  // Load from LocalStorage
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.workspace) setWorkspaceState(parsed.workspace);
-        if (parsed.leads) setLeads(parsed.leads);
-        if (parsed.properties) setProperties(parsed.properties);
-        if (parsed.deals) setDeals(parsed.deals);
-        if (parsed.visits) setVisits(parsed.visits);
-        if (parsed.checklists) setChecklists(parsed.checklists);
-        if (parsed.templates) setTemplates(parsed.templates);
-        if (parsed.microsite) setMicrosite(parsed.microsite);
-      }
-    } catch (e) {
-      console.error('Failed to load stored state', e);
+  const syncWithDatabase = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setDbStatus('demo');
+      return;
     }
-    setIsLoaded(true);
+
+    setDbStatus('checking');
+    const health = await checkDbConnection();
+    if (!health.connected) {
+      setDbStatus('demo');
+      return;
+    }
+
+    setDbStatus('connected');
+    try {
+      const [cloudWs, cloudLeads, cloudProps, cloudDeals, cloudVisits, cloudMicro] = await Promise.all([
+        fetchWorkspaceFromDb(),
+        fetchLeadsFromDb(workspace.id),
+        fetchPropertiesFromDb(workspace.id),
+        fetchDealsFromDb(workspace.id),
+        fetchVisitsFromDb(workspace.id),
+        fetchMicrositeFromDb(workspace.id),
+      ]);
+
+      if (cloudWs) setWorkspaceState(cloudWs);
+      if (cloudLeads && cloudLeads.length > 0) setLeads(cloudLeads);
+      if (cloudProps && cloudProps.length > 0) setProperties(cloudProps);
+      if (cloudDeals && cloudDeals.length > 0) setDeals(cloudDeals);
+      if (cloudVisits && cloudVisits.length > 0) setVisits(cloudVisits);
+      if (cloudMicro) setMicrosite(cloudMicro);
+    } catch (e) {
+      console.warn('Sync failed, using existing state:', e);
+    }
+  }, [workspace.id]);
+
+  // Initial load
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initializeState() {
+      if (isSupabaseConfigured()) {
+        const health = await checkDbConnection();
+        if (health.connected && isMounted) {
+          setDbStatus('connected');
+          try {
+            const [cloudWs, cloudLeads, cloudProps, cloudDeals, cloudVisits, cloudMicro] = await Promise.all([
+              fetchWorkspaceFromDb(),
+              fetchLeadsFromDb(INITIAL_WORKSPACE.id),
+              fetchPropertiesFromDb(INITIAL_WORKSPACE.id),
+              fetchDealsFromDb(INITIAL_WORKSPACE.id),
+              fetchVisitsFromDb(INITIAL_WORKSPACE.id),
+              fetchMicrositeFromDb(INITIAL_WORKSPACE.id),
+            ]);
+
+            if (cloudWs) setWorkspaceState(cloudWs);
+            if (cloudLeads && cloudLeads.length > 0) setLeads(cloudLeads);
+            if (cloudProps && cloudProps.length > 0) setProperties(cloudProps);
+            if (cloudDeals && cloudDeals.length > 0) setDeals(cloudDeals);
+            if (cloudVisits && cloudVisits.length > 0) setVisits(cloudVisits);
+            if (cloudMicro) setMicrosite(cloudMicro);
+
+            setIsLoaded(true);
+            return;
+          } catch (e) {
+            console.warn('Failed to load from Supabase, falling back to local storage', e);
+          }
+        }
+      }
+
+      // Fallback to LocalStorage / Demo data
+      if (isMounted) {
+        setDbStatus('demo');
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed.workspace) setWorkspaceState(parsed.workspace);
+            if (parsed.leads) setLeads(parsed.leads);
+            if (parsed.properties) setProperties(parsed.properties);
+            if (parsed.deals) setDeals(parsed.deals);
+            if (parsed.visits) setVisits(parsed.visits);
+            if (parsed.checklists) setChecklists(parsed.checklists);
+            if (parsed.templates) setTemplates(parsed.templates);
+            if (parsed.microsite) setMicrosite(parsed.microsite);
+          }
+        } catch (e) {
+          console.error('Failed to load stored state', e);
+        }
+        setIsLoaded(true);
+      }
+    }
+
+    initializeState();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Save to LocalStorage
+  // Save to LocalStorage as safety cache
   useEffect(() => {
     if (!isLoaded) return;
     try {
@@ -126,7 +239,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const newLead: Lead = {
       ...leadData,
-      id: 'lead-' + Date.now(),
+      id: generateId('lead'),
       workspace_id: workspace.id,
       is_dead: false,
       created_at: new Date().toISOString(),
@@ -134,42 +247,62 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     setLeads(prev => [newLead, ...prev]);
+
+    if (dbStatus === 'connected') {
+      insertLeadToDb(newLead).catch(err => console.error('Failed to insert lead into Supabase:', err));
+    }
+
     return { success: true, lead: newLead };
-  }, [canAddLead, checkDuplicatePhone, plan.limits.maxLeads, workspace.id]);
+  }, [canAddLead, checkDuplicatePhone, plan.limits.maxLeads, workspace.id, dbStatus]);
 
   const updateLead = useCallback((id: string, updates: Partial<Lead>) => {
     setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates, updated_at: new Date().toISOString() } : l));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      updateLeadInDb(id, updates).catch(err => console.error('Failed to update lead in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const deleteLead = useCallback((id: string) => {
     setLeads(prev => prev.filter(l => l.id !== id));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      deleteLeadFromDb(id).catch(err => console.error('Failed to delete lead from Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const updateLeadStage = useCallback((id: string, stage: LeadStage) => {
+    const isDead = stage === 'lost';
     setLeads(prev => prev.map(l => {
       if (l.id !== id) return l;
       return {
         ...l,
         stage,
-        is_dead: stage === 'lost',
+        is_dead: isDead,
         updated_at: new Date().toISOString(),
       };
     }));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      updateLeadInDb(id, { stage, is_dead: isDead }).catch(err => console.error('Failed to update stage in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const reactivateLead = useCallback((id: string) => {
-    setLeads(prev => prev.map(l => {
-      if (l.id !== id) return l;
-      return {
-        ...l,
-        stage: 'contacted',
-        is_dead: false,
-        dead_reason: undefined,
-        last_contacted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-    }));
-  }, []);
+    const updates = {
+      stage: 'contacted' as LeadStage,
+      is_dead: false,
+      dead_reason: undefined,
+      last_contacted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+
+    if (dbStatus === 'connected') {
+      updateLeadInDb(id, updates).catch(err => console.error('Failed to reactivate lead in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const importLeadsFromCSV = useCallback((csvRows: Array<{ name: string; phone: string; email?: string; budget?: string; bhk?: string; locality?: string; source?: string }>) => {
     let imported = 0;
@@ -187,8 +320,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      newLeads.push({
-        id: 'lead-csv-' + Math.random().toString(36).substr(2, 9),
+      const createdLead: Lead = {
+        id: generateId('lead-csv'),
         workspace_id: workspace.id,
         name: row.name,
         phone: row.phone,
@@ -202,15 +335,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         is_dead: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      });
+      };
+
+      newLeads.push(createdLead);
       imported++;
+
+      if (dbStatus === 'connected') {
+        insertLeadToDb(createdLead).catch(err => console.error('Failed to import lead to Supabase:', err));
+      }
     });
 
     if (newLeads.length > 0) {
       setLeads(prev => [...newLeads, ...prev]);
     }
     return { imported, duplicates };
-  }, [leads, workspace.id]);
+  }, [leads, workspace.id, dbStatus]);
 
   const addProperty = useCallback((propData: Omit<Property, 'id' | 'workspace_id' | 'created_at' | 'updated_at'>) => {
     if (!canAddProperty()) {
@@ -219,23 +358,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const newProp: Property = {
       ...propData,
-      id: 'prop-' + Date.now(),
+      id: generateId('prop'),
       workspace_id: workspace.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     setProperties(prev => [newProp, ...prev]);
+
+    if (dbStatus === 'connected') {
+      insertPropertyToDb(newProp).catch(err => console.error('Failed to insert property into Supabase:', err));
+    }
+
     return { success: true, property: newProp };
-  }, [canAddProperty, plan.limits.maxProperties, workspace.id]);
+  }, [canAddProperty, plan.limits.maxProperties, workspace.id, dbStatus]);
 
   const updateProperty = useCallback((id: string, updates: Partial<Property>) => {
     setProperties(prev => prev.map(p => p.id === id ? { ...p, ...updates, updated_at: new Date().toISOString() } : p));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      updatePropertyInDb(id, updates).catch(err => console.error('Failed to update property in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const deleteProperty = useCallback((id: string) => {
     setProperties(prev => prev.filter(p => p.id !== id));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      deletePropertyFromDb(id).catch(err => console.error('Failed to delete property from Supabase:', err));
+    }
+  }, [dbStatus]);
 
   // Lead to Property Matching Algorithm
   const getMatchingPropertiesForLead = useCallback((lead: Lead) => {
@@ -252,7 +404,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           reasons.push(`BHK matches (${prop.bhk})`);
         }
       } else {
-        score += 20; // no specific BHK requirement
+        score += 20;
       }
 
       // Locality match (35 pts)
@@ -274,7 +426,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         score += 25;
         reasons.push('Fits budget range');
       } else if (prop.price <= maxBudget * 1.1) {
-        score += 15; // slightly flexible budget
+        score += 15;
         reasons.push('Within 10% of budget');
       }
 
@@ -289,35 +441,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const scheduleVisit = useCallback((visitData: Omit<SiteVisit, 'id' | 'workspace_id' | 'created_at'>) => {
     const newVisit: SiteVisit = {
       ...visitData,
-      id: 'visit-' + Date.now(),
+      id: generateId('visit'),
       workspace_id: workspace.id,
       created_at: new Date().toISOString(),
     };
     setVisits(prev => [newVisit, ...prev]);
 
-    // Update lead stage if appropriate
+    if (dbStatus === 'connected') {
+      insertVisitToDb(newVisit).catch(err => console.error('Failed to insert site visit into Supabase:', err));
+    }
+
     updateLeadStage(visitData.lead_id, 'site_visit');
-  }, [updateLeadStage, workspace.id]);
+  }, [updateLeadStage, workspace.id, dbStatus]);
 
   const updateVisit = useCallback((id: string, updates: Partial<SiteVisit>) => {
     setVisits(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      updateVisitInDb(id, updates).catch(err => console.error('Failed to update visit in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const addDeal = useCallback((dealData: Omit<Deal, 'id' | 'workspace_id' | 'created_at' | 'updated_at'>) => {
     const newDeal: Deal = {
       ...dealData,
-      id: 'deal-' + Date.now(),
+      id: generateId('deal'),
       workspace_id: workspace.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     setDeals(prev => [newDeal, ...prev]);
+
+    if (dbStatus === 'connected') {
+      insertDealToDb(newDeal).catch(err => console.error('Failed to insert deal into Supabase:', err));
+    }
+
     updateLeadStage(dealData.lead_id, 'booked');
-  }, [updateLeadStage, workspace.id]);
+  }, [updateLeadStage, workspace.id, dbStatus]);
 
   const updateDeal = useCallback((id: string, updates: Partial<Deal>) => {
     setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates, updated_at: new Date().toISOString() } : d));
-  }, []);
+
+    if (dbStatus === 'connected') {
+      updateDealInDb(id, updates).catch(err => console.error('Failed to update deal in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const updateChecklist = useCallback((checklistId: string, itemIndex: number, checked: boolean) => {
     setChecklists(prev => prev.map(chk => {
@@ -331,8 +499,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateMicrosite = useCallback((updates: Partial<Microsite>) => {
-    setMicrosite(prev => ({ ...prev, ...updates }));
-  }, []);
+    setMicrosite(prev => {
+      const updated = { ...prev, ...updates };
+      if (dbStatus === 'connected') {
+        saveMicrositeToDb(updated).catch(err => console.error('Failed to update microsite in Supabase:', err));
+      }
+      return updated;
+    });
+  }, [dbStatus]);
+
+  const setWorkspace = useCallback((ws: Workspace) => {
+    setWorkspaceState(ws);
+    if (dbStatus === 'connected') {
+      saveWorkspaceToDb(ws).catch(err => console.error('Failed to update workspace in Supabase:', err));
+    }
+  }, [dbStatus]);
 
   const loadDemoData = useCallback(() => {
     setWorkspaceState(INITIAL_WORKSPACE);
@@ -362,7 +543,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider value={{
       workspace,
-      setWorkspace: setWorkspaceState,
+      setWorkspace,
       leads,
       properties,
       deals,
@@ -371,6 +552,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       templates,
       microsite,
       plan,
+      dbStatus,
+      isDbConnected: dbStatus === 'connected',
+      syncWithDatabase,
       addLead,
       updateLead,
       deleteLead,
