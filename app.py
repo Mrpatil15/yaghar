@@ -18,6 +18,7 @@ import scoring
 import scripts
 import export
 import invoicing
+import workability
 
 # Page Configuration
 st.set_page_config(
@@ -222,6 +223,7 @@ db.init_db()
 NAV_PAGES = [
     "🏠 Follow-up Dashboard",
     "📥 1. Client & Batch Intake",
+    "🏆 Workable Leads & Pipeline",
     "🧹 2. Cleaning & Standardization",
     "🎯 3. Lead Scoring Engine",
     "📜 4. Segmentation & Scripts",
@@ -580,7 +582,22 @@ elif nav_option == "📥 1. Client & Batch Intake":
         st.subheader("Upload Raw Dead-Lead List")
         all_c = db.get_all_clients()
         if not all_c:
-            st.warning("Please create at least one client firm in the first tab before uploading leads.")
+            st.markdown("""
+            <div style="background:#FFFBEB; border:1px solid #FCD34D; border-radius:10px; padding:18px; margin-bottom:18px;">
+                <b style="color:#B45309; font-size:1.05rem;">🏢 Quick Brokerage Setup</b><br/>
+                <span style="color:#475569; font-size:0.9rem;">You haven't onboarded a client firm yet. Set a name and focus corridor below to begin uploading your leads immediately:</span>
+            </div>
+            """, unsafe_allow_html=True)
+            q_col1, q_col2 = st.columns(2)
+            with q_col1:
+                q_name = st.text_input("Brokerage / Client Firm Name *", value="Central Mumbai Realty Desk")
+            with q_col2:
+                q_corridor = st.text_input("Focus Corridor / Micro-Market *", value="Central Mumbai (Chembur, Wadala, Ghatkopar)")
+            if st.button("✨ Set Client Firm & Enable Lead Upload", type="primary"):
+                cid = db.create_client(q_name, "+91 98200 00000", q_corridor, str(date.today()), "Self onboarded")
+                st.session_state.active_client_id = cid
+                st.success(f"Firm '{q_name}' onboarded! You can now upload your leads below.")
+                st.rerun()
         else:
             col_b1, col_b2 = st.columns([1, 1.5])
             with col_b1:
@@ -592,7 +609,7 @@ elif nav_option == "📥 1. Client & Batch Intake":
                 )
                 batch_name_input = st.text_input("Batch Reference Name *", value=f"Dead Leads Run — {datetime.now().strftime('%b %Y')}")
                 flat_fee_input = st.number_input("Agreed Service Flat Fee (INR ₹)", min_value=0.0, value=15000.0, step=2500.0)
-                uploaded_file = st.file_uploader("Upload CSV or Excel Export", type=["csv", "xlsx", "xls"])
+                uploaded_file = st.file_uploader("Upload CSV or Excel Export (e.g. data_heawen.xlsx)", type=["csv", "xlsx", "xls"])
 
             with col_b2:
                 if uploaded_file is not None:
@@ -636,54 +653,293 @@ elif nav_option == "📥 1. Client & Batch Intake":
                             map_source = st.selectbox("4. Lead Source", cols_with_none, index=cols_with_none.index(col_source_guess) if col_source_guess in cols_with_none else 0)
                             map_notes = st.selectbox("5. Notes / Requirements", cols_with_none, index=cols_with_none.index(col_notes_guess) if col_notes_guess in cols_with_none else 0)
 
-                        if st.button("🚀 Process & Save Batch", type="primary", use_container_width=True):
-                            # Create batch in DB
-                            new_batch_id = db.create_batch(
-                                client_id=intake_client_id,
-                                batch_name=batch_name_input,
-                                upload_date=str(date.today()),
-                                source_file=uploaded_file.name,
-                                flat_fee_amount=float(flat_fee_input)
-                            )
-                            # Set delivery date default to today
-                            db.update_batch_delivery(new_batch_id, str(date.today()))
+                        # Primary 1-Click Auto-Pilot Banner & Action
+                        st.markdown("""
+                        <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); border: 1.5px solid #F59E0B; border-radius: 10px; padding: 16px 20px; margin: 16px 0 10px 0;">
+                            <div style="color: #F59E0B; font-weight: 800; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">⭐ Recommended Instant Mode</div>
+                            <div style="color: #FFFFFF; font-size: 1.15rem; font-weight: 700; margin: 4px 0;">⚡ 1-Click Auto-Pilot: Load, Clean, Score & Rank All Leads</div>
+                            <div style="color: #CBD5E1; font-size: 0.88rem;">Automatically normalizes phone numbers (+91), dedupes, scores intent, assigns personalized Hinglish call pitches, and opens the Workable Leads Ranking queue immediately!</div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                            # Clean and parse leads
-                            cleaned_df, summary = cleaning.clean_and_standardize_leads(
-                                df=df_raw,
-                                col_name=map_name,
-                                col_phone=map_phone,
-                                col_date=map_date if map_date != "-- Select --" else "",
-                                col_source=map_source if map_source != "-- Select --" else "",
-                                col_notes=map_notes if map_notes != "-- Select --" else ""
-                            )
+                        if st.button("🚀 1-Click Auto-Pilot: Clean, Score, Assign Scripts & Rank All Leads →", type="primary", use_container_width=True):
+                            with st.spinner("Executing full reactivation engine..."):
+                                new_batch_id, summary = db.auto_process_full_batch(
+                                    client_id=intake_client_id,
+                                    batch_name=batch_name_input,
+                                    source_file=uploaded_file.name,
+                                    df_raw=df_raw,
+                                    col_name=map_name,
+                                    col_phone=map_phone,
+                                    col_date=map_date if map_date != "-- Select --" else "",
+                                    col_source=map_source if map_source != "-- Select --" else "",
+                                    col_notes=map_notes if map_notes != "-- Select --" else "",
+                                    flat_fee=float(flat_fee_input)
+                                )
+                                st.session_state.active_client_id = intake_client_id
+                                st.session_state.active_batch_id = new_batch_id
+                                st.session_state.nav_radio = "🏆 Workable Leads & Pipeline"
+                                st.success(f"✅ Successfully processed {summary['total_raw']} leads! ({summary['valid_count']} clean, {summary['duplicates_count']} duplicates filtered). Redirecting to Workable Leads Pipeline...")
+                                st.rerun()
 
-                            # Bulk insert into DB
-                            leads_to_insert = []
-                            for _, r in cleaned_df.iterrows():
-                                leads_to_insert.append({
-                                    "batch_id": new_batch_id,
-                                    "name": r["name"],
-                                    "phone": r["phone"],
-                                    "raw_phone": r["raw_phone"],
-                                    "source": r["source"],
-                                    "enquiry_date": r["enquiry_date"],
-                                    "raw_notes": r["raw_notes"],
-                                    "cleaned_flag": r["cleaned_flag"],
-                                    "flag_reason": r["flag_reason"]
-                                })
-                            db.insert_leads_bulk(leads_to_insert)
-
-                            st.session_state.active_client_id = intake_client_id
-                            st.session_state.active_batch_id = new_batch_id
-
-                            st.success(f"Batch #{new_batch_id} saved! Proceeding to Step 2: Cleaning & Standardization.")
-                            st.rerun()
+                        with st.expander("🛠️ Advanced Mode: Manual Multi-Step Save"):
+                            st.caption("Only saves cleaned leads without automated scoring if you want to inspect weights step-by-step.")
+                            if st.button("Save Raw Leads Only (Manual Progression)"):
+                                new_batch_id = db.create_batch(
+                                    client_id=intake_client_id,
+                                    batch_name=batch_name_input,
+                                    upload_date=str(date.today()),
+                                    source_file=uploaded_file.name,
+                                    flat_fee_amount=float(flat_fee_input)
+                                )
+                                db.update_batch_delivery(new_batch_id, str(date.today()))
+                                cleaned_df, summary = cleaning.clean_and_standardize_leads(
+                                    df=df_raw,
+                                    col_name=map_name,
+                                    col_phone=map_phone,
+                                    col_date=map_date if map_date != "-- Select --" else "",
+                                    col_source=map_source if map_source != "-- Select --" else "",
+                                    col_notes=map_notes if map_notes != "-- Select --" else ""
+                                )
+                                leads_to_insert = []
+                                for _, r in cleaned_df.iterrows():
+                                    leads_to_insert.append({
+                                        "batch_id": new_batch_id,
+                                        "name": r["name"],
+                                        "phone": r["phone"],
+                                        "raw_phone": r["raw_phone"],
+                                        "source": r["source"],
+                                        "enquiry_date": r["enquiry_date"],
+                                        "raw_notes": r["raw_notes"],
+                                        "cleaned_flag": r["cleaned_flag"],
+                                        "flag_reason": r["flag_reason"]
+                                    })
+                                db.insert_leads_bulk(leads_to_insert)
+                                st.session_state.active_client_id = intake_client_id
+                                st.session_state.active_batch_id = new_batch_id
+                                st.success(f"Batch #{new_batch_id} saved! Proceeding to Step 2: Cleaning.")
+                                st.session_state.nav_radio = "🧹 2. Cleaning & Standardization"
+                                st.rerun()
 
                     except Exception as e:
                         st.error(f"Error parsing file: {e}")
                 else:
-                    st.info("Select an Excel or CSV file from your computer to preview and map columns.")
+                    st.info("Select an Excel or CSV file from your computer (like `data_heawen.xlsx`) to preview and map columns.")
+
+# =======================================================================================
+# PAGE: WORKABLE LEADS & RESPONSE PIPELINE
+# =======================================================================================
+elif nav_option == "🏆 Workable Leads & Pipeline":
+    render_context_banner()
+    st.markdown("""
+    <div class="brand-banner">
+        <h1 class="brand-title"><span>🏆</span> Workable Leads & Response Pipeline</h1>
+        <div class="brand-subtitle">
+            Dynamic prioritization: leads are continuously ranked by response status, site visit likelihood, and buyer readiness.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not st.session_state.active_batch_id or not st.session_state.active_client_id:
+        st.warning("Please select or upload a batch first in '1. Client & Batch Intake'.")
+    else:
+        raw_leads = db.get_leads_by_batch(st.session_state.active_batch_id, cleaned_only=True)
+        if not raw_leads:
+            st.info("No clean leads found in this batch. Please upload a lead file or complete intake.")
+        else:
+            # Rank leads dynamically on basis of response & lead score
+            ranked_leads = workability.rank_leads_by_workability(raw_leads)
+
+            total_count = len(ranked_leads)
+            workable_count = sum(1 for l in ranked_leads if l["is_workable"])
+            site_visits = sum(1 for l in ranked_leads if l.get("call_status") in ("Site Visit Booked", "Converted"))
+            callbacks = sum(1 for l in ranked_leads if l.get("call_status") in ("High Interest / Callback",))
+            pending_calls = sum(1 for l in ranked_leads if l.get("call_status") in ("Not Called", "Pending Call"))
+
+            # Executive Pipeline Metric Cards
+            w1, w2, w3, w4, w5 = st.columns(5)
+            with w1:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">Total Leads</div>
+                    <div class="metric-value">{total_count}</div>
+                    <div class="metric-sub" style="color: #64748B;">In Active Batch</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with w2:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">🎯 Workable Leads</div>
+                    <div class="metric-value" style="color: #10B981;">{workable_count}</div>
+                    <div class="metric-sub">{round(workable_count/total_count*100, 1) if total_count else 0}% Workable Rate</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with w3:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">📅 Site Visits Booked</div>
+                    <div class="metric-value" style="color: #059669;">{site_visits}</div>
+                    <div class="metric-sub">Appointments</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with w4:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">🔥 Callbacks Requested</div>
+                    <div class="metric-value" style="color: #D97706;">{callbacks}</div>
+                    <div class="metric-sub">High Intent</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with w5:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">📞 Pending Calls</div>
+                    <div class="metric-value" style="color: #2563EB;">{pending_calls}</div>
+                    <div class="metric-sub">Awaiting Contact</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            st.markdown("<br/>", unsafe_allow_html=True)
+
+            # Filter Bar & Export
+            col_f1, col_f2, col_f3 = st.columns([1.5, 1.2, 1.1])
+            with col_f1:
+                filter_opt = st.selectbox(
+                    "Filter Pipeline Stage",
+                    [
+                        "🔥 Only Workable Leads",
+                        "Show All Leads",
+                        "📅 Site Visits Booked",
+                        "🔥 High Interest Callbacks",
+                        "📞 Connected - Exploring",
+                        "🔄 Ringing / Retry Queue",
+                        "💤 Pending Initial Call",
+                        "❌ Dropped / Unworkable"
+                    ],
+                    index=0
+                )
+            with col_f2:
+                search_query = st.text_input("🔍 Search Name, Phone, or Notes", placeholder="Type name, phone, or keyword...")
+            with col_f3:
+                st.write("")
+                st.write("")
+                batch_obj = db.get_batch_by_id(st.session_state.active_batch_id)
+                excel_workable = export.generate_workable_excel(ranked_leads, batch_obj or {})
+                st.download_button(
+                    label="📥 Export Ranked Sheet (Excel)",
+                    data=excel_workable,
+                    file_name=f"Workable_Ranked_{batch_obj.get('client_name', 'Client').replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+
+            # Filtering logic
+            display_leads = ranked_leads
+            if filter_opt == "🔥 Only Workable Leads":
+                display_leads = [l for l in display_leads if l["is_workable"]]
+            elif filter_opt == "📅 Site Visits Booked":
+                display_leads = [l for l in display_leads if l.get("call_status") in ("Site Visit Booked", "Converted")]
+            elif filter_opt == "🔥 High Interest Callbacks":
+                display_leads = [l for l in display_leads if l.get("call_status") in ("High Interest / Callback",)]
+            elif filter_opt == "📞 Connected - Exploring":
+                display_leads = [l for l in display_leads if l.get("call_status") in ("Connected - Exploring", "Connected")]
+            elif filter_opt == "🔄 Ringing / Retry Queue":
+                display_leads = [l for l in display_leads if l.get("call_status") in ("Ringing / No Answer", "Call Busy / Later")]
+            elif filter_opt == "💤 Pending Initial Call":
+                display_leads = [l for l in display_leads if l.get("call_status") in ("Not Called", "Pending Call")]
+            elif filter_opt == "❌ Dropped / Unworkable":
+                display_leads = [l for l in display_leads if not l["is_workable"]]
+
+            if search_query:
+                sq = search_query.lower()
+                display_leads = [l for l in display_leads if sq in str(l.get("name","")).lower() or sq in str(l.get("phone","")) or sq in str(l.get("raw_notes","")).lower()]
+
+            st.write(f"Displaying **{len(display_leads)}** leads ordered by Workability Rank:")
+
+            # Render Ranked Lead Cards
+            for l in display_leads:
+                rank_num = l["workable_rank"]
+                badge_label, bg_color, text_color = workability.WORKABLE_TIER_BADGES.get(
+                    l["workable_tier"], (l["workable_tier"], "#F1F5F9", "#334155")
+                )
+
+                if rank_num == 1:
+                    rank_badge = f"<span style='background:#FEF3C7; color:#B45309; font-weight:800; padding:4px 10px; border-radius:6px; font-size:0.92rem; border:1px solid #FCD34D;'>🥇 Rank #{rank_num}</span>"
+                elif rank_num == 2:
+                    rank_badge = f"<span style='background:#F1F5F9; color:#334155; font-weight:800; padding:4px 10px; border-radius:6px; font-size:0.92rem; border:1px solid #CBD5E1;'>🥈 Rank #{rank_num}</span>"
+                elif rank_num == 3:
+                    rank_badge = f"<span style='background:#FFEDD5; color:#C2410C; font-weight:800; padding:4px 10px; border-radius:6px; font-size:0.92rem; border:1px solid #FDBA74;'>🥉 Rank #{rank_num}</span>"
+                else:
+                    rank_badge = f"<span style='background:#F8FAFC; color:#64748B; font-weight:700; padding:4px 8px; border-radius:6px; font-size:0.85rem; border:1px solid #E2E8F0;'>Rank #{rank_num}</span>"
+
+                status_pill = f"<span style='background:{bg_color}; color:{text_color}; font-weight:700; padding:4px 12px; border-radius:999px; font-size:0.8rem;'>{badge_label}</span>"
+
+                raw_p = str(l.get("phone", ""))
+                wa_p = f"91{raw_p}" if len(raw_p) == 10 else "".join(c for c in raw_p if c.isdigit())
+
+                with st.container():
+                    st.markdown(f"""
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:12px; padding:16px 20px; margin-bottom:12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                {rank_badge}
+                                <span style="font-size:1.15rem; font-weight:700; color:#0F172A;">{l['name']}</span>
+                                <code style="font-size:0.9rem; background:#F8FAFC; padding:2px 8px; border-radius:4px; border:1px solid #E2E8F0;">+91 {raw_p}</code>
+                                {status_pill}
+                            </div>
+                            <div>
+                                <span style="font-size:0.82rem; color:#64748B;">Workable Score: <b style="color:#0F172A; font-size:0.95rem;">{l['workable_score']}/100</b> &nbsp;|&nbsp; Base Score: <b>{l.get('score', 0)}/100</b> ({l.get('tier', 'Warm')})</span>
+                            </div>
+                        </div>
+                        <div style="margin: 8px 0; font-size:0.88rem; color:#475569;">
+                            <b>Source:</b> {l.get('source', 'Direct')} &nbsp;•&nbsp; <b>Date:</b> {l.get('enquiry_date', '—')} &nbsp;•&nbsp; <b>Requirement:</b> <i>{l.get('raw_notes') or 'No notes provided'}</i>
+                        </div>
+                        <div class="script-box">
+                            <b>Assigned Hinglish Pitch Script:</b><br/>
+                            {l.get('assigned_script') or 'No script assigned yet.'}
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; gap:8px;">
+                                <a href="https://wa.me/{wa_p}?text={l.get('assigned_script','')}" target="_blank" style="background:#25D366; color:white; padding:5px 14px; border-radius:6px; text-decoration:none; font-weight:600; font-size:0.82rem;">
+                                    💬 Open WhatsApp
+                                </a>
+                                <a href="tel:+91{raw_p}" style="background:#0F172A; color:white; padding:5px 14px; border-radius:6px; text-decoration:none; font-weight:600; font-size:0.82rem;">
+                                    📞 Call Lead
+                                </a>
+                            </div>
+                            <div style="font-size:0.85rem; color:#0F172A; font-weight:600;">
+                                Current Outcome: <span style="color:#D97706;">{l.get('call_status', 'Not Called')}</span>
+                                {f" — <i>Notes: {l.get('call_notes')}</i>" if l.get('call_notes') else ""}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    # 1-Tap Response Buttons
+                    b_col1, b_col2, b_col3, b_col4, b_col5 = st.columns(5)
+                    if b_col1.button("📅 Site Visit Booked", key=f"rk_sv_{l['id']}", help="Promote lead to Rank #1 Ultra Hot"):
+                        db.update_lead_call_outcome(l['id'], "Site Visit Booked", "Site Visit Confirmed")
+                        st.rerun()
+                    if b_col2.button("🔥 High Interest", key=f"rk_hi_{l['id']}", help="Requested callback / interested in project"):
+                        db.update_lead_call_outcome(l['id'], "High Interest / Callback", "Requested Callback")
+                        st.rerun()
+                    if b_col3.button("📞 Connected", key=f"rk_co_{l['id']}", help="Spoke, exploring options"):
+                        db.update_lead_call_outcome(l['id'], "Connected - Exploring", "Connected, exploring")
+                        st.rerun()
+                    if b_col4.button("🔄 Ringing / Busy", key=f"rk_rg_{l['id']}", help="Ringing / No Answer - retry later"):
+                        db.update_lead_call_outcome(l['id'], "Ringing / No Answer", "Ringing / Try again")
+                        st.rerun()
+                    if b_col5.button("❌ Not Interested", key=f"rk_no_{l['id']}", help="Drop from workable queue"):
+                        db.update_lead_call_outcome(l['id'], "Not Interested", "Not interested / Drop")
+                        st.rerun()
+
+                    with st.expander("📝 Add Custom Notes / Meeting Date", expanded=False):
+                        note_text = st.text_input("Meeting / Outcome Remarks", value=l.get("call_notes") or "", key=f"note_in_{l['id']}")
+                        if st.button("Save Note", key=f"save_n_{l['id']}"):
+                            db.update_lead_call_outcome(l['id'], l.get('call_status') or 'Not Called', note_text)
+                            st.success("Note saved!")
+                            st.rerun()
 
 # =======================================================================================
 # PAGE 2: CLEANING & STANDARDIZATION

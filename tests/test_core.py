@@ -123,5 +123,20 @@ class TestDeadLeadReactivation(unittest.TestCase):
         batch_updated = get_batch_by_id(batch_id)
         self.assertEqual(batch_updated["payment_status"], "Paid")
 
+    def test_workability_ranking(self):
+        import workability
+        sample_leads = [
+            {"id": 1, "name": "Rahul", "score": 80.0, "call_status": "Not Called"},
+            {"id": 2, "name": "Pooja", "score": 50.0, "call_status": "Site Visit Booked"},
+            {"id": 3, "name": "Amit", "score": 90.0, "call_status": "Not Interested"}
+        ]
+        ranked = workability.rank_leads_by_workability(sample_leads)
+        # Pooja (Site Visit Booked) should jump to Rank #1
+        self.assertEqual(ranked[0]["name"], "Pooja")
+        self.assertEqual(ranked[0]["workable_rank"], 1)
+        self.assertEqual(ranked[0]["workable_tier"], "Ultra Hot")
+        # Amit (Not Interested) should be marked unworkable
+        self.assertFalse(ranked[-1]["is_workable"])
+
 if __name__ == "__main__":
     unittest.main()

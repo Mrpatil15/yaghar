@@ -261,3 +261,119 @@ def reimport_client_status_sheet(batch_id: int, file_bytes: io.BytesIO) -> Dict[
             "success": False,
             "message": f"Error parsing returned sheet: {str(e)}"
         }
+
+def generate_workable_excel(leads: List[Dict[str, Any]], batch_info: Dict[str, Any]) -> io.BytesIO:
+    """
+    Creates an Excel spreadsheet prioritizing leads ranked by response and workability.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Ranked Workable Leads"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Styles
+    font_title = Font(name="Segoe UI", size=15, bold=True, color="0F172A")
+    font_subtitle = Font(name="Segoe UI", size=10, italic=True, color="475569")
+    font_header = Font(name="Segoe UI", size=11, bold=True, color="FFFFFF")
+    font_body = Font(name="Segoe UI", size=10)
+    font_bold = Font(name="Segoe UI", size=10, bold=True)
+    
+    fill_header = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+    fill_ultra = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    fill_high = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+    fill_active = PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid")
+    fill_lost = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+    
+    border_thin = Side(border_style="thin", color="CBD5E1")
+    cell_border = Border(top=border_thin, left=border_thin, right=border_thin, bottom=border_thin)
+    
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+    align_wrap = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    client_name = batch_info.get("client_name", "Valued Client")
+    batch_name = batch_info.get("batch_name", "Batch")
+    
+    ws["A1"] = f"Workability Priority Register — {client_name}"
+    ws["A1"].font = font_title
+    ws["A2"] = f"Batch: {batch_name} | Leads dynamically ranked by response status & conversion likelihood"
+    ws["A2"].font = font_subtitle
+
+    headers = [
+        "Workable Rank",
+        "Workability Tier",
+        "Lead Name",
+        "Phone Number",
+        "Response / Outcome",
+        "Workability Score",
+        "Assigned Pitch Script",
+        "Original Tier",
+        "Call Notes / Remarks"
+    ]
+
+    header_row = 4
+    for c_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=c_idx, value=h)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = align_center
+        cell.border = cell_border
+        
+    ws.row_dimensions[header_row].height = 28
+
+    row_idx = 5
+    for lead in leads:
+        rank_val = lead.get("workable_rank", row_idx - 4)
+        tier_val = lead.get("workable_tier", "Active Pipeline")
+        w_score = lead.get("workable_score", lead.get("score", 0))
+
+        raw_phone = str(lead.get("phone", "")).strip()
+        formatted_phone = f"+91 {raw_phone[:5]} {raw_phone[5:]}" if len(raw_phone) == 10 else raw_phone
+
+        row_vals = [
+            f"#{rank_val}",
+            tier_val,
+            lead.get("name", "Unknown"),
+            formatted_phone,
+            lead.get("call_status", "Not Called"),
+            round(float(w_score), 1) if w_score is not None else "",
+            lead.get("assigned_script", ""),
+            lead.get("tier", ""),
+            lead.get("call_notes", "")
+        ]
+
+        for c_idx, val in enumerate(row_vals, start=1):
+            cell = ws.cell(row=row_idx, column=c_idx, value=val)
+            cell.font = font_body
+            cell.border = cell_border
+
+            if c_idx in (1, 2, 4, 6, 8):
+                cell.alignment = align_center
+            elif c_idx == 7:
+                cell.alignment = align_wrap
+            else:
+                cell.alignment = align_left
+
+            if c_idx == 2:
+                cell.font = font_bold
+                if "Ultra" in tier_val or "Site" in tier_val:
+                    cell.fill = fill_ultra
+                elif "High" in tier_val or "Priority" in tier_val:
+                    cell.fill = fill_high
+                elif "Active" in tier_val:
+                    cell.fill = fill_active
+                elif "Unworkable" in tier_val or "Lost" in tier_val:
+                    cell.fill = fill_lost
+
+        ws.row_dimensions[row_idx].height = 36
+        row_idx += 1
+
+    widths = {"A": 16, "B": 22, "C": 22, "D": 18, "E": 24, "F": 18, "G": 55, "H": 14, "I": 30}
+    for col_let, w in widths.items():
+        ws.column_dimensions[col_let].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+

@@ -326,8 +326,6 @@ def get_next_invoice_number(client_id: int) -> str:
     conn = get_connection()
     cfg = conn.execute("SELECT invoice_counter FROM client_configs WHERE client_id = ?", (client_id,)).fetchone()
     counter = cfg["invoice_counter"] if cfg and cfg["invoice_counter"] else 1001
-    
-    # Increment counter
     conn.execute("UPDATE client_configs SET invoice_counter = ? WHERE client_id = ?", (counter + 1, client_id))
     conn.commit()
     conn.close()
@@ -335,5 +333,118 @@ def get_next_invoice_number(client_id: int) -> str:
     year = datetime.now().year
     return f"INV-{year}-{counter:04d}"
 
+def auto_process_full_batch(client_id: int, 
+                            batch_name: str, 
+                            source_file: str, 
+                            df_raw: Any, 
+                            col_name: str, 
+                            col_phone: str, 
+                            col_date: str = "", 
+                            col_source: str = "", 
+                            col_notes: str = "", 
+                            flat_fee: float = 15000.0) -> Tuple[int, Dict[str, Any]]:
+    """
+    Executes complete end-to-end processing in a single pass:
+    Creates batch -> cleans & normalizes phone -> multi-factor scoring -> 
+    Hinglish script segmentation -> saves all records to database.
+    """
+    import cleaning
+    import scoring
+    import scripts
+    from datetime import date
+
+    # 1. Create batch record
+    batch_id = create_batch(
+        client_id=client_id,
+        batch_name=batch_name,
+        upload_date=str(date.today()),
+        source_file=source_file,
+        flat_fee_amount=flat_fee
+    )
+    update_batch_delivery(batch_id, str(date.today()))
+
+    # 2. Clean and standardize leads
+    cleaned_df, summary = cleaning.clean_and_standardize_leads(
+        df=df_raw,
+        col_name=col_name,
+        col_phone=col_phone,
+        col_date=col_date,
+        col_source=col_source,
+        col_notes=col_notes
+    )
+
+    # 3. Get client config
+    client = get_client_by_id(client_id)
+    corridor = client.get("corridor", "Central Mumbai") if client else ""
+    cfg = get_client_config(client_id)
+
+    w_rec = float(cfg.get("weight_recency", 40.0))
+    w_src = float(cfg.get("weight_source", 30.0))
+    w_fit = float(cfg.get("weight_fit", 30.0))
+
+    # 4. Score all leads
+    scored_df = scoring.compute_composite_scores(
+        cleaned_df,
+        weight_recency=w_rec,
+        weight_source=w_src,
+        weight_fit=w_fit,
+        corridor=corridor
+    )
+
+    # 5. Segment and assign Hinglish scripts
+    hot_th = float(cfg.get("hot_threshold", 70.0))
+    warm_th = float(cfg.get("warm_threshold", 40.0))
+    templates = {
+        "Hot": cfg.get("script_hot", scripts.DEFAULT_SCRIPTS["Hot"]),
+        "Warm": cfg.get("script_warm", scripts.DEFAULT_SCRIPTS["Warm"]),
+        "Cold": cfg.get("script_cold", scripts.DEFAULT_SCRIPTS["Cold"])
+    }
+
+    segmented_df = scripts.segment_and_assign_scripts(
+        df=scored_df,
+        hot_threshold=hot_th,
+        warm_threshold=warm_th,
+        script_templates=templates,
+        corridor=corridor
+    )
+
+    # 6. Bulk insert leads
+    leads_to_insert = []
+    for _, r in segmented_df.iterrows():
+        leads_to_insert.append({
+            "batch_id": batch_id,
+            "name": r["name"],
+            "phone": r["phone"],
+            "raw_phone": r["raw_phone"],
+            "source": r["source"],
+            "enquiry_date": r["enquiry_date"],
+            "raw_notes": r["raw_notes"],
+            "cleaned_flag": r["cleaned_flag"],
+            "flag_reason": r["flag_reason"]
+        })
+    insert_leads_bulk(leads_to_insert)
+
+    # 7. Update scores, tiers, and scripts
+    db_leads = get_leads_by_batch(batch_id)
+    updates = []
+    for dbl, (_, sr) in zip(db_leads, segmented_df.iterrows()):
+        updates.append({
+            "id": dbl["id"],
+            "batch_id": batch_id,
+            "score": sr["score"],
+            "tier": sr["tier"],
+            "assigned_script": sr["assigned_script"]
+        })
+    update_lead_scores(batch_id, updates)
+
+    summary["batch_id"] = batch_id
+    summary["hot_count"] = int((segmented_df["tier"] == "Hot").sum())
+    summary["warm_count"] = int((segmented_df["tier"] == "Warm").sum())
+    summary["cold_count"] = int((segmented_df["tier"] == "Cold").sum())
+    summary["mean_score"] = round(segmented_df["score"].mean(), 1) if not segmented_df.empty else 0.0
+
+    return batch_id, summary
+
 # Initialize on module import
 init_db()
+
