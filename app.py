@@ -208,18 +208,7 @@ CUSTOM_CSS = """
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# ----------------- Session State Initialization -----------------
-if "active_client_id" not in st.session_state:
-    st.session_state.active_client_id = None
-if "active_batch_id" not in st.session_state:
-    st.session_state.active_batch_id = None
-if "nav_radio" not in st.session_state:
-    st.session_state.nav_radio = "🏠 Follow-up Dashboard"
-
-# Ensure DB initialized
-db.init_db()
-
-# ----------------- Sidebar Navigation -----------------
+# ----------------- Navigation Pages & Safe Router -----------------
 NAV_PAGES = [
     "🏠 Follow-up Dashboard",
     "📥 1. Client & Batch Intake",
@@ -231,6 +220,29 @@ NAV_PAGES = [
     "🧾 6. Non-GST Invoicing"
 ]
 
+def navigate_to(page_name: str):
+    """Safely navigate to another page on the next rerun without widget state conflicts."""
+    st.session_state.target_page = page_name
+    st.rerun()
+
+# ----------------- Session State Initialization -----------------
+# Check for pending page navigation BEFORE the nav_radio widget is instantiated
+if "target_page" in st.session_state and st.session_state.target_page:
+    target = st.session_state.pop("target_page")
+    if target in NAV_PAGES:
+        st.session_state.nav_radio = target
+
+if "active_client_id" not in st.session_state:
+    st.session_state.active_client_id = None
+if "active_batch_id" not in st.session_state:
+    st.session_state.active_batch_id = None
+if "nav_radio" not in st.session_state:
+    st.session_state.nav_radio = "🏠 Follow-up Dashboard"
+
+# Ensure DB initialized
+db.init_db()
+
+# ----------------- Sidebar Navigation -----------------
 with st.sidebar:
     st.markdown("""
     <div style="padding: 10px 0 20px 0; text-align: center;">
@@ -425,8 +437,7 @@ if nav_option == "🏠 Follow-up Dashboard":
         </div>
         """, unsafe_allow_html=True)
         if st.button("🚀 Go to '1. Client & Batch Intake' to Upload Leads →", type="primary", use_container_width=True, key="dash_start_btn"):
-            st.session_state.nav_radio = "📥 1. Client & Batch Intake"
-            st.rerun()
+            navigate_to("📥 1. Client & Batch Intake")
     else:
         batch_rows = []
         today = date.today()
@@ -678,9 +689,8 @@ elif nav_option == "📥 1. Client & Batch Intake":
                                 )
                                 st.session_state.active_client_id = intake_client_id
                                 st.session_state.active_batch_id = new_batch_id
-                                st.session_state.nav_radio = "🏆 Workable Leads & Pipeline"
                                 st.success(f"✅ Successfully processed {summary['total_raw']} leads! ({summary['valid_count']} clean, {summary['duplicates_count']} duplicates filtered). Redirecting to Workable Leads Pipeline...")
-                                st.rerun()
+                                navigate_to("🏆 Workable Leads & Pipeline")
 
                         with st.expander("🛠️ Advanced Mode: Manual Multi-Step Save"):
                             st.caption("Only saves cleaned leads without automated scoring if you want to inspect weights step-by-step.")
@@ -718,8 +728,7 @@ elif nav_option == "📥 1. Client & Batch Intake":
                                 st.session_state.active_client_id = intake_client_id
                                 st.session_state.active_batch_id = new_batch_id
                                 st.success(f"Batch #{new_batch_id} saved! Proceeding to Step 2: Cleaning.")
-                                st.session_state.nav_radio = "🧹 2. Cleaning & Standardization"
-                                st.rerun()
+                                navigate_to("🧹 2. Cleaning & Standardization")
 
                     except Exception as e:
                         st.error(f"Error parsing file: {e}")
