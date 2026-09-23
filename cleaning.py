@@ -2,9 +2,10 @@
 cleaning.py - Data cleaning, phone normalization, deduplication, and junk detection.
 """
 
+import io
 import re
 import pandas as pd
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional
 
 # Common test names or dummy patterns
 JUNK_NAME_PATTERNS = [
@@ -162,3 +163,163 @@ def clean_and_standardize_leads(df: pd.DataFrame,
     }
 
     return cleaned_df, summary
+
+
+def load_and_classify_leads(
+    source: Any,
+    is_pasted: bool = False,
+    force_no_header: Optional[bool] = None
+) -> Tuple[Optional[pd.DataFrame], Dict[str, Optional[str]], bool, str]:
+    """
+    Intelligently loads uploaded file or pasted text into a DataFrame.
+    Automatically detects whether the file has a header row or if row 1 is lead data (e.g. data_heawen.xlsx).
+    Inspects column contents (phone numbers, names, dates, requirements, projects)
+    and automatically classifies each column into name, phone, date, source, and notes.
+
+    Returns:
+        (df, mapping_dict, detected_no_header, message)
+    """
+    df = None
+    detected_no_header = False
+
+    try:
+        if is_pasted:
+            text = str(source).strip()
+            if not text:
+                return None, {}, False, "No pasted text provided."
+            first_line = text.splitlines()[0]
+            sep = "\t" if "\t" in first_line else ("," if "," in first_line else None)
+
+            if force_no_header:
+                df = pd.read_csv(io.StringIO(text), sep=sep, header=None, engine="python")
+                detected_no_header = True
+            else:
+                df = pd.read_csv(io.StringIO(text), sep=sep, engine="python")
+                for col in df.columns:
+                    digits = re.sub(r"\D", "", str(col).strip())
+                    if len(digits) >= 10:
+                        detected_no_header = True
+                        break
+                if detected_no_header and force_no_header is None:
+                    df = pd.read_csv(io.StringIO(text), sep=sep, header=None, engine="python")
+        else:
+            fname = getattr(source, "name", str(source)).lower()
+            if hasattr(source, "seek"):
+                source.seek(0)
+
+            if force_no_header:
+                if fname.endswith(".csv"):
+                    df = pd.read_csv(source, header=None)
+                else:
+                    df = pd.read_excel(source, header=None)
+                detected_no_header = True
+            else:
+                if fname.endswith(".csv"):
+                    df = pd.read_csv(source)
+                else:
+                    df = pd.read_excel(source)
+
+                for col in df.columns:
+                    digits = re.sub(r"\D", "", str(col).strip())
+                    if len(digits) >= 10:
+                        detected_no_header = True
+                        break
+                if detected_no_header and force_no_header is None:
+                    if hasattr(source, "seek"):
+                        source.seek(0)
+                    if fname.endswith(".csv"):
+                        df = pd.read_csv(source, header=None)
+                    else:
+                        df = pd.read_excel(source, header=None)
+
+        if df is None or df.empty:
+            return None, {}, detected_no_header, "Dataset is empty."
+
+        if detected_no_header:
+            df.columns = [f"Column {i+1}" for i in range(len(df.columns))]
+        else:
+            df.columns = [str(c).strip() for c in df.columns]
+
+        cols = list(df.columns)
+        mapping = {"name": None, "phone": None, "date": None, "source": None, "notes": None}
+
+        # 1. Header-based name matching
+        for c in cols:
+            cl = str(c).lower()
+            if not mapping["phone"] and any(k in cl for k in ["phone", "mobile", "contact", "cell", "number"]):
+                mapping["phone"] = c
+            elif not mapping["name"] and any(k in cl for k in ["name", "customer", "lead", "client", "buyer"]):
+                mapping["name"] = c
+            elif not mapping["date"] and any(k in cl for k in ["date", "time", "created", "enquiry", "added"]):
+                mapping["date"] = c
+            elif not mapping["source"] and any(k in cl for k in ["source", "channel", "campaign", "portal", "origin", "project", "property"]):
+                mapping["source"] = c
+            elif not mapping["notes"] and any(k in cl for k in ["note", "remark", "requirement", "comment", "desc", "budget"]):
+                mapping["notes"] = c
+
+        # 2. Content-based phone check
+        if not mapping["phone"]:
+            for c in cols:
+                sample = df[c].dropna().astype(str).head(30)
+                p_hits = sum(1 for v in sample if len(re.sub(r"\D", "", v)) in [10, 11, 12])
+                if len(sample) > 0 and (p_hits / len(sample)) >= 0.4:
+                    mapping["phone"] = c
+                    break
+
+        # 3. Content-based date check
+        if not mapping["date"]:
+            for c in cols:
+                if c == mapping["phone"]:
+                    continue
+                sample = df[c].dropna().head(20)
+                d_hits = 0
+                for v in sample:
+                    try:
+                        pd.to_datetime(v)
+                        d_hits += 1
+                    except Exception:
+                        pass
+                if len(sample) > 0 and (d_hits / len(sample)) >= 0.5:
+                    mapping["date"] = c
+                    break
+
+        # 4. Content-based name check (short strings, typically 1 to 4 words)
+        if not mapping["name"]:
+            best_s = -1
+            for c in cols:
+                if c in [mapping["phone"], mapping["date"]]:
+                    continue
+                sample = df[c].dropna().astype(str).head(30)
+                if len(sample) == 0:
+                    continue
+                avg_len = sum(len(s) for s in sample) / len(sample)
+                if avg_len < 35:
+                    score = 100 - avg_len
+                    if score > best_s:
+                        best_s = score
+                        mapping["name"] = c
+
+        # 5. Content-based notes / requirements check
+        rem = [c for c in cols if c not in [mapping["phone"], mapping["date"], mapping["name"]]]
+        if not mapping["notes"]:
+            notes_kws = ["bhk", "budget", "carpet", "lac", "cr", "rent", "buy", "looking", "sqft", "ready", "broker", "investor"]
+            best_col = None
+            max_hits = -1
+            for c in rem:
+                sample = df[c].dropna().astype(str).head(30)
+                hits = sum(any(kw in str(s).lower() for kw in notes_kws) for s in sample)
+                if hits > max_hits:
+                    max_hits = hits
+                    best_col = c
+            if best_col:
+                mapping["notes"] = best_col
+                rem = [c for c in rem if c != best_col]
+
+        # 6. Source from remaining
+        if not mapping["source"] and rem:
+            mapping["source"] = rem[0]
+
+        return df, mapping, detected_no_header, "Success"
+    except Exception as e:
+        return None, {}, False, str(e)
+

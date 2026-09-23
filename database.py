@@ -222,9 +222,13 @@ def insert_leads_bulk(leads_data: List[Dict[str, Any]]) -> int:
         return 0
     conn = get_connection()
     cur = conn.cursor()
+    for d in leads_data:
+        d.setdefault("score", None)
+        d.setdefault("tier", None)
+        d.setdefault("assigned_script", None)
     cur.executemany("""
-        INSERT INTO leads (batch_id, name, phone, raw_phone, source, enquiry_date, raw_notes, cleaned_flag, flag_reason, call_status)
-        VALUES (:batch_id, :name, :phone, :raw_phone, :source, :enquiry_date, :raw_notes, :cleaned_flag, :flag_reason, 'Not Called')
+        INSERT INTO leads (batch_id, name, phone, raw_phone, source, enquiry_date, raw_notes, cleaned_flag, flag_reason, call_status, score, tier, assigned_script)
+        VALUES (:batch_id, :name, :phone, :raw_phone, :source, :enquiry_date, :raw_notes, :cleaned_flag, :flag_reason, 'Not Called', :score, :tier, :assigned_script)
     """, leads_data)
     count = cur.rowcount
     conn.commit()
@@ -408,7 +412,7 @@ def auto_process_full_batch(client_id: int,
         corridor=corridor
     )
 
-    # 6. Bulk insert leads
+    # 6. Bulk insert leads with scores, tiers, and scripts directly in one pass
     leads_to_insert = []
     for _, r in segmented_df.iterrows():
         leads_to_insert.append({
@@ -420,22 +424,12 @@ def auto_process_full_batch(client_id: int,
             "enquiry_date": r["enquiry_date"],
             "raw_notes": r["raw_notes"],
             "cleaned_flag": r["cleaned_flag"],
-            "flag_reason": r["flag_reason"]
+            "flag_reason": r["flag_reason"],
+            "score": r["score"],
+            "tier": r["tier"],
+            "assigned_script": r["assigned_script"]
         })
     insert_leads_bulk(leads_to_insert)
-
-    # 7. Update scores, tiers, and scripts
-    db_leads = get_leads_by_batch(batch_id)
-    updates = []
-    for dbl, (_, sr) in zip(db_leads, segmented_df.iterrows()):
-        updates.append({
-            "id": dbl["id"],
-            "batch_id": batch_id,
-            "score": sr["score"],
-            "tier": sr["tier"],
-            "assigned_script": sr["assigned_script"]
-        })
-    update_lead_scores(batch_id, updates)
 
     summary["batch_id"] = batch_id
     summary["hot_count"] = int((segmented_df["tier"] == "Hot").sum())

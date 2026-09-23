@@ -138,5 +138,18 @@ class TestDeadLeadReactivation(unittest.TestCase):
         # Amit (Not Interested) should be marked unworkable
         self.assertFalse(ranked[-1]["is_workable"])
 
+    def test_load_and_classify_leads(self):
+        from cleaning import load_and_classify_leads
+        # Test pasted tab-separated data without headers
+        pasted = "S N Pandey\t8840991735\tRunwal Forests\tLooking for 2bhk\nSanjay\t9224491174\tRunwal Greens\tBroker"
+        df, mapping, no_h, msg = load_and_classify_leads(pasted, is_pasted=True)
+        self.assertEqual(msg, "Success")
+        self.assertTrue(no_h)
+        self.assertEqual(len(df), 2)
+        self.assertEqual(mapping["name"], "Column 1")
+        self.assertEqual(mapping["phone"], "Column 2")
+        self.assertEqual(mapping["source"], "Column 3")
+        self.assertEqual(mapping["notes"], "Column 4")
+
 if __name__ == "__main__":
     unittest.main()

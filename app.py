@@ -620,39 +620,67 @@ elif nav_option == "📥 1. Client & Batch Intake":
                 )
                 batch_name_input = st.text_input("Batch Reference Name *", value=f"Dead Leads Run — {datetime.now().strftime('%b %Y')}")
                 flat_fee_input = st.number_input("Agreed Service Flat Fee (INR ₹)", min_value=0.0, value=15000.0, step=2500.0)
-                uploaded_file = st.file_uploader("Upload CSV or Excel Export (e.g. data_heawen.xlsx)", type=["csv", "xlsx", "xls"])
+
+                intake_method = st.radio("Choose Intake Method:", ["📁 Upload File (.xlsx / .csv)", "📋 Paste Leads Directly (Ctrl+V)"], horizontal=True)
+
+                if intake_method == "📁 Upload File (.xlsx / .csv)":
+                    uploaded_file = st.file_uploader("Upload CSV or Excel Export (e.g. data_heawen.xlsx)", type=["csv", "xlsx", "xls"])
+                    pasted_text = None
+                else:
+                    uploaded_file = None
+                    pasted_text = st.text_area(
+                        "Paste Leads from Excel / Google Sheets *",
+                        height=160,
+                        placeholder="Copy rows in Excel and paste directly here (Ctrl+V)...\ne.g.:\nS N Pandey\t8840991735\tRunwal Forests\tLooking for 2bhk\nSanjay\t9224491174\tRunwal Greens\tBroker"
+                    )
 
             with col_b2:
-                if uploaded_file is not None:
-                    try:
-                        if uploaded_file.name.endswith(".csv"):
-                            df_raw = pd.read_csv(uploaded_file)
+                is_pasted = (intake_method != "📁 Upload File (.xlsx / .csv)")
+                has_source = (pasted_text is not None and len(pasted_text.strip()) > 0) if is_pasted else (uploaded_file is not None)
+
+                if has_source:
+                    source_obj = pasted_text if is_pasted else uploaded_file
+                    source_label = "Pasted Leads Data" if is_pasted else uploaded_file.name
+
+                    # Initial load with content classification
+                    df_initial, auto_mapping, detected_no_header, load_msg = cleaning.load_and_classify_leads(source_obj, is_pasted=is_pasted)
+
+                    if df_initial is None:
+                        st.error(f"Error parsing data: {load_msg}")
+                    else:
+                        c_hdr1, c_hdr2 = st.columns([1.2, 1])
+                        with c_hdr1:
+                            force_no_header = st.checkbox(
+                                "First row contains lead data (no header in file)",
+                                value=detected_no_header,
+                                help="Check this if the very first row of your spreadsheet is a lead and not column names.",
+                                key="intake_force_no_hdr"
+                            )
+                        with c_hdr2:
+                            if force_no_header:
+                                st.info("ℹ️ Preserving Row 1 as lead data")
+
+                        # If user toggled header checkbox from auto-detection, reload with user's preference
+                        if force_no_header != detected_no_header:
+                            df_raw, mapping, _, _ = cleaning.load_and_classify_leads(source_obj, is_pasted=is_pasted, force_no_header=force_no_header)
                         else:
-                            df_raw = pd.read_excel(uploaded_file)
+                            df_raw, mapping = df_initial, auto_mapping
 
-                        st.success(f"Loaded **{len(df_raw)}** rows from `{uploaded_file.name}`")
-                        st.caption("Preview of raw file:")
-                        st.dataframe(df_raw.head(3), use_container_width=True)
+                        st.success(f"Loaded **{len(df_raw)}** rows from `{source_label}`")
+                        st.caption("Preview of loaded data:")
+                        st.dataframe(df_raw.head(3), width="stretch")
 
-                        st.markdown("#### 🔗 Column Mapping")
-                        st.caption("Map the file's custom headers to expected standard fields:")
+                        st.markdown("#### 🔗 Column Mapping (Auto-Detected)")
+                        st.caption("The system automatically detected the best matching columns below. Adjust if needed:")
 
-                        cols = list(df_raw.columns)
+                        cols = [str(c) for c in df_raw.columns]
                         cols_with_none = ["-- Select --"] + cols
 
-                        # Intelligent auto-detector for column mapping
-                        def detect_col(candidates, options):
-                            for cand in candidates:
-                                for opt in options:
-                                    if cand in opt.lower():
-                                        return opt
-                            return options[0]
-
-                        col_name_guess = detect_col(["name", "customer", "lead", "client"], cols)
-                        col_phone_guess = detect_col(["phone", "mobile", "contact", "cell", "number"], cols)
-                        col_date_guess = detect_col(["date", "time", "created", "enquiry", "added"], cols)
-                        col_source_guess = detect_col(["source", "campaign", "channel", "portal", "origin"], cols)
-                        col_notes_guess = detect_col(["note", "remark", "requirement", "comment", "desc", "budget"], cols)
+                        col_name_guess = mapping.get("name")
+                        col_phone_guess = mapping.get("phone")
+                        col_date_guess = mapping.get("date")
+                        col_source_guess = mapping.get("source")
+                        col_notes_guess = mapping.get("notes")
 
                         m_c1, m_c2 = st.columns(2)
                         with m_c1:
@@ -673,12 +701,12 @@ elif nav_option == "📥 1. Client & Batch Intake":
                         </div>
                         """, unsafe_allow_html=True)
 
-                        if st.button("🚀 1-Click Auto-Pilot: Clean, Score, Assign Scripts & Rank All Leads →", type="primary", use_container_width=True):
+                        if st.button("🚀 1-Click Auto-Pilot: Clean, Score, Assign Scripts & Rank All Leads →", type="primary", width="stretch"):
                             with st.spinner("Executing full reactivation engine..."):
                                 new_batch_id, summary = db.auto_process_full_batch(
                                     client_id=intake_client_id,
                                     batch_name=batch_name_input,
-                                    source_file=uploaded_file.name,
+                                    source_file=source_label,
                                     df_raw=df_raw,
                                     col_name=map_name,
                                     col_phone=map_phone,
@@ -699,7 +727,7 @@ elif nav_option == "📥 1. Client & Batch Intake":
                                     client_id=intake_client_id,
                                     batch_name=batch_name_input,
                                     upload_date=str(date.today()),
-                                    source_file=uploaded_file.name,
+                                    source_file=source_label,
                                     flat_fee_amount=float(flat_fee_input)
                                 )
                                 db.update_batch_delivery(new_batch_id, str(date.today()))
@@ -729,11 +757,11 @@ elif nav_option == "📥 1. Client & Batch Intake":
                                 st.session_state.active_batch_id = new_batch_id
                                 st.success(f"Batch #{new_batch_id} saved! Proceeding to Step 2: Cleaning.")
                                 navigate_to("🧹 2. Cleaning & Standardization")
-
-                    except Exception as e:
-                        st.error(f"Error parsing file: {e}")
                 else:
-                    st.info("Select an Excel or CSV file from your computer (like `data_heawen.xlsx`) to preview and map columns.")
+                    if is_pasted:
+                        st.info("📋 Copy lead rows from Excel or Google Sheets and paste them in the box on the left.")
+                    else:
+                        st.info("📁 Select an Excel or CSV file from your computer (like `data_heawen.xlsx`) to preview and map columns.")
 
 # =======================================================================================
 # PAGE: WORKABLE LEADS & RESPONSE PIPELINE
