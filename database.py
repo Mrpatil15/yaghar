@@ -244,6 +244,15 @@ def get_leads_by_batch(batch_id: int, cleaned_only: bool = False) -> List[Dict[s
     conn.close()
     return [dict(r) for r in rows]
 
+def get_all_leads(cleaned_only: bool = False) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    if cleaned_only:
+        rows = conn.execute("SELECT * FROM leads WHERE cleaned_flag = 1 ORDER BY score DESC, id ASC").fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM leads ORDER BY id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def update_lead_scores(batch_id: int, score_updates: List[Dict[str, Any]]):
     """Bulk updates lead score, tier, and assigned_script."""
     conn = get_connection()

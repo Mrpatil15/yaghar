@@ -225,18 +225,34 @@ with st.sidebar:
     if is_supabase:
         ws_name = st.session_state.get("active_workspace_name", "Shree Ganesh Realty")
         st.markdown(f"""
-        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid #059669; border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; text-align: center;">
+        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid #059669; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; text-align: center;">
             <div style="color: #34D399; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">🟢 Supabase Cloud: Live</div>
             <div style="color: #FFFFFF; font-size: 0.85rem; font-weight: 600; margin-top: 2px;">{ws_name}</div>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
-        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid #D97706; border-radius: 8px; padding: 8px 12px; margin-bottom: 16px; text-align: center;">
+        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid #D97706; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; text-align: center;">
             <div style="color: #FBBF24; font-size: 0.75rem; font-weight: 700;">🟡 Standalone Mode</div>
             <div style="color: #CBD5E1; font-size: 0.82rem; margin-top: 2px;">Set secrets to connect Supabase</div>
         </div>
         """, unsafe_allow_html=True)
+
+    with st.expander("⚙️ Cloud Database Settings", expanded=False):
+        if is_supabase:
+            st.success("✅ Supabase PostgreSQL Connected")
+            st.caption(f"Workspace: **{st.session_state.get('active_workspace_name', 'Shree Ganesh Realty')}**")
+        else:
+            st.info("Operating with SQLite resilient storage.")
+        
+        sb_u = st.text_input("Custom Supabase URL", value=st.session_state.get("custom_supabase_url", ""), placeholder="https://xyz.supabase.co", key="sb_u_in")
+        sb_k = st.text_input("Custom Supabase Key", value=st.session_state.get("custom_supabase_key", ""), type="password", placeholder="eyJhbG...", key="sb_k_in")
+        if st.button("Save & Reconnect", key="btn_apply_sb"):
+            if sb_u and sb_k:
+                st.session_state.custom_supabase_url = sb_u.strip()
+                st.session_state.custom_supabase_key = sb_k.strip()
+                sc._client_instance = None
+                st.rerun()
 
     nav_option = st.radio(
         "Navigation",
@@ -435,8 +451,16 @@ elif nav_option == "📥 Upload Data":
                 else:
                     df_raw, mapping = df_initial, auto_mapping
 
-                st.success(f"Loaded **{len(df_raw)}** rows from `{source_label}`")
-                st.dataframe(df_raw.head(3), use_container_width=True)
+                st.success(f"✅ Loaded **{len(df_raw):,} total rows** from `{source_label}`")
+
+                p_col1, p_col2 = st.columns([1.5, 1])
+                with p_col1:
+                    st.markdown(f"**Data Preview (Showing first rows of {len(df_raw):,} loaded records):**")
+                with p_col2:
+                    preview_n = st.selectbox("Rows to preview", [10, 25, 50, 100, 250], index=0, key="upload_preview_n")
+
+                st.dataframe(df_raw.head(preview_n), use_container_width=True, height=280)
+                st.caption(f"ℹ️ Showing rows 1 to {min(preview_n, len(df_raw)):,} of {len(df_raw):,} rows. All {len(df_raw):,} records are loaded in memory and will be cleaned, scored, and saved to the CRM database.")
 
                 st.markdown("#### 🔗 Column Mapping (Auto-Detected)")
                 cols = [str(c) for c in df_raw.columns]
@@ -460,53 +484,77 @@ elif nav_option == "📥 Upload Data":
                 </div>
                 """, unsafe_allow_html=True)
 
-                if st.button("🚀 Process & Ingest Directly into Supabase Leads Table →", type="primary", use_container_width=True):
-                    with st.spinner("Processing leads, cleaning phone numbers, and scoring..."):
-                        # 1. Clean & Deduplicate
-                        cleaned_df, summary = cleaning.clean_and_standardize_leads(
-                            df=df_raw,
-                            col_name=col_name,
-                            col_phone=col_phone,
-                            col_date=col_date if col_date != "-- Select --" else "",
-                            col_source=col_source if col_source != "-- Select --" else "",
-                            col_notes=col_notes if col_notes != "-- Select --" else ""
-                        )
+                if st.button(f"🚀 Clean, Score & Ingest All {len(df_raw):,} Leads into CRM Database →", type="primary", use_container_width=True):
+                    prog_bar = st.progress(0.05, text="Step 1/4: Cleaning & normalizing phone numbers (+91)...")
 
-                        # 2. Compute composite scores
-                        scored_df = scoring.compute_composite_scores(
-                            cleaned_df,
-                            weight_recency=40.0,
-                            weight_source=30.0,
-                            weight_fit=30.0
-                        )
+                    # 1. Clean & Deduplicate
+                    cleaned_df, summary = cleaning.clean_and_standardize_leads(
+                        df=df_raw,
+                        col_name=col_name,
+                        col_phone=col_phone,
+                        col_date=col_date if col_date != "-- Select --" else "",
+                        col_source=col_source if col_source != "-- Select --" else "",
+                        col_notes=col_notes if col_notes != "-- Select --" else ""
+                    )
 
-                        # 3. Assign scripts & tiers
-                        segmented_df = scripts.segment_and_assign_scripts(
-                            scored_df,
-                            hot_threshold=70.0,
-                            warm_threshold=40.0
-                        )
+                    prog_bar.progress(0.35, text="Step 2/4: Computing multi-factor composite scores...")
 
-                        # 4. Prepare leads for Supabase insertion
-                        supabase_records = []
-                        for _, r in segmented_df.iterrows():
-                            supabase_records.append({
-                                "name": r["name"],
-                                "phone": r["phone"],
-                                "raw_phone": r["raw_phone"],
-                                "source": r["source"],
-                                "stage": "new",
-                                "score": float(r["score"]),
-                                "tier": r["tier"],
-                                "call_status": "Not Called",
-                                "notes": r["raw_notes"],
-                                "assigned_script": r["assigned_script"],
-                                "is_dead": (r["cleaned_flag"] == 0)
-                            })
+                    # 2. Compute composite scores
+                    scored_df = scoring.compute_composite_scores(
+                        cleaned_df,
+                        weight_recency=40.0,
+                        weight_source=30.0,
+                        weight_fit=30.0
+                    )
 
-                        # 5. Insert directly to Supabase
-                        inserted = sc.insert_supabase_leads(supabase_records)
-                        st.success(f"🎉 Successfully ingested **{inserted}** leads directly into Supabase! (Duplicates filtered: {summary['duplicates_count']})")
+                    prog_bar.progress(0.60, text="Step 3/4: Assigning scripts & segmenting tiers (Hot/Warm/Cold)...")
+
+                    # 3. Assign scripts & tiers
+                    segmented_df = scripts.segment_and_assign_scripts(
+                        scored_df,
+                        hot_threshold=70.0,
+                        warm_threshold=40.0
+                    )
+
+                    prog_bar.progress(0.75, text=f"Step 4/4: Writing {len(segmented_df):,} leads to database...")
+
+                    # 4. Prepare leads for insertion
+                    supabase_records = []
+                    for _, r in segmented_df.iterrows():
+                        supabase_records.append({
+                            "name": r["name"],
+                            "phone": r["phone"],
+                            "raw_phone": r["raw_phone"],
+                            "source": r["source"],
+                            "stage": "new",
+                            "score": float(r["score"]),
+                            "tier": r["tier"],
+                            "call_status": "Not Called",
+                            "notes": r["raw_notes"],
+                            "assigned_script": r["assigned_script"],
+                            "is_dead": (r["cleaned_flag"] == 0)
+                        })
+
+                    # Progress callback for chunked insertion
+                    def update_ingest_progress(done, total):
+                        pct = 0.75 + (done / total) * 0.25
+                        prog_bar.progress(min(pct, 0.99), text=f"Step 4/4: Ingested {done:,} of {total:,} leads...")
+
+                    # 5. Insert directly
+                    inserted = sc.insert_supabase_leads(supabase_records, progress_callback=update_ingest_progress)
+                    prog_bar.progress(1.0, text="✅ Ingestion Complete!")
+
+                    st.balloons()
+                    st.success(f"🎉 **Ingestion Complete!** Successfully saved **{inserted:,} leads** into the CRM database.")
+
+                    # KPI Cards for Ingestion
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Total Rows in File", f"{len(df_raw):,}")
+                    k2.metric("Valid Leads Saved", f"{inserted:,}")
+                    k3.metric("Duplicates Removed", f"{summary['duplicates_count']:,}")
+                    k4.metric("Mean Score", f"{round(segmented_df['score'].mean(), 1) if not segmented_df.empty else 0}")
+
+                    if st.button("👉 View Leads in CRM Pipeline Now →", type="primary", use_container_width=True):
                         navigate_to("👥 Leads & CRM Pipeline")
         else:
             st.info("Select a spreadsheet file or paste lead rows to begin.")
@@ -557,77 +605,125 @@ elif nav_option == "👥 Leads & CRM Pipeline":
         if source_filter != "All":
             filtered_leads = [l for l in filtered_leads if str(l.get("source", "")) == source_filter]
 
-        st.caption(f"Showing **{len(filtered_leads)}** of **{len(leads)}** leads from Supabase")
+        # View Mode Toggle & Summary
+        vm_c1, vm_c2 = st.columns([1.5, 1])
+        with vm_c1:
+            st.caption(f"Showing **{len(filtered_leads):,}** of **{len(leads):,}** leads from Supabase")
+        with vm_c2:
+            view_mode = st.radio("Display Mode", ["📊 Spreadsheet Grid View", "📇 Interactive Action Cards"], horizontal=True, label_visibility="collapsed")
 
-        # Table & Card display
-        for lead in filtered_leads[:50]:  # Paginate top 50 for speed
-            lid = lead["id"]
-            name = lead.get("name", "Unknown")
-            phone = lead.get("phone", "—")
-            score = lead.get("score", 50.0)
-            tier = lead.get("tier", "Warm")
-            stage = lead.get("stage", "new")
-            call_status = lead.get("call_status", "Not Called")
-            source = lead.get("source", "—")
-            notes = lead.get("notes") or lead.get("raw_notes") or "No notes"
+        if view_mode == "📊 Spreadsheet Grid View":
+            # High speed full-dataset grid view
+            table_rows = []
+            for l in filtered_leads:
+                table_rows.append({
+                    "Name": l.get("name", "Unknown"),
+                    "Phone": l.get("phone", "—"),
+                    "Score": round(float(l.get("score") or 50.0), 1),
+                    "Tier": l.get("tier", "Warm"),
+                    "Stage": l.get("stage", "new"),
+                    "Call Status": l.get("call_status", "Not Called"),
+                    "Source": l.get("source", "—"),
+                    "Notes": l.get("notes") or l.get("raw_notes") or ""
+                })
+            df_display = pd.DataFrame(table_rows)
+            st.dataframe(df_display, use_container_width=True, height=520)
 
-            tier_badge = f'<span class="badge-hot">🔥 Hot ({score:.1f})</span>' if tier == "Hot" else (f'<span class="badge-warm">⚡ Warm ({score:.1f})</span>' if tier == "Warm" else f'<span class="badge-cold">❄️ Cold ({score:.1f})</span>')
-            stage_badge = f'<span class="badge-stage stage-{stage}">{stage.replace("_", " ")}</span>'
+            # Fast CSV Download of filtered leads
+            csv_bytes = df_display.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Download {len(df_display):,} Filtered Leads as CSV",
+                data=csv_bytes,
+                file_name=f"Yaghar_CRM_Leads_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv"
+            )
 
-            with st.container():
-                st.markdown(f"""
-                <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span style="font-size: 1.1rem; font-weight: 700; color: #0F172A;">{name}</span>
-                            <span style="margin-left: 10px; color: #64748B; font-size: 0.9rem; font-family: monospace;">📞 {phone}</span>
-                            <span style="margin-left: 10px;">{tier_badge}</span>
-                            <span style="margin-left: 6px;">{stage_badge}</span>
+        else:
+            # Interactive Action Cards with full pagination
+            pg_col1, pg_col2, pg_col3 = st.columns([1, 1, 2])
+            with pg_col1:
+                page_size = st.selectbox("Cards per page", [20, 50, 100], index=0, key="crm_cards_per_page")
+
+            total_pages = max(1, (len(filtered_leads) + page_size - 1) // page_size)
+            with pg_col2:
+                cur_page = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1, key="crm_cur_page")
+
+            start_idx = (cur_page - 1) * page_size
+            end_idx = min(start_idx + page_size, len(filtered_leads))
+
+            with pg_col3:
+                st.write("")
+                st.caption(f"Displaying leads **{start_idx + 1:,}** to **{end_idx:,}** of **{len(filtered_leads):,}** total")
+
+            # Table & Card display for selected page slice
+            for lead in filtered_leads[start_idx:end_idx]:
+                lid = lead["id"]
+                name = lead.get("name", "Unknown")
+                phone = lead.get("phone", "—")
+                score = float(lead.get("score") or 50.0)
+                tier = lead.get("tier", "Warm")
+                stage = lead.get("stage", "new")
+                call_status = lead.get("call_status", "Not Called")
+                source = lead.get("source", "—")
+                notes = lead.get("notes") or lead.get("raw_notes") or "No notes"
+
+                tier_badge = f'<span class="badge-hot">🔥 Hot ({score:.1f})</span>' if tier == "Hot" else (f'<span class="badge-warm">⚡ Warm ({score:.1f})</span>' if tier == "Warm" else f'<span class="badge-cold">❄️ Cold ({score:.1f})</span>')
+                stage_badge = f'<span class="badge-stage stage-{stage}">{stage.replace("_", " ")}</span>'
+
+                with st.container():
+                    st.markdown(f"""
+                    <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <span style="font-size: 1.1rem; font-weight: 700; color: #0F172A;">{name}</span>
+                                <span style="margin-left: 10px; color: #64748B; font-size: 0.9rem; font-family: monospace;">📞 {phone}</span>
+                                <span style="margin-left: 10px;">{tier_badge}</span>
+                                <span style="margin-left: 6px;">{stage_badge}</span>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #64748B;">
+                                Source: <b>{source}</b> | Call Status: <b>{call_status}</b>
+                            </div>
                         </div>
-                        <div style="font-size: 0.8rem; color: #64748B;">
-                            Source: <b>{source}</b> | Call Status: <b>{call_status}</b>
+                        <div style="color: #475569; font-size: 0.88rem; margin: 8px 0;">
+                            📝 <i>{notes}</i>
                         </div>
                     </div>
-                    <div style="color: #475569; font-size: 0.88rem; margin: 8px 0;">
-                        📝 <i>{notes}</i>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
-                # 1-Tap Action Buttons
-                b_c1, b_c2, b_c3, b_c4, b_c5, b_c6 = st.columns([1, 1, 1, 1, 1, 1.2])
-                with b_c1:
-                    if st.button("📅 Site Visit", key=f"sv_{lid}"):
-                        sc.update_supabase_lead_status(lid, "site_visit", "Site Visit Booked")
-                        st.toast(f"Marked {name} for Site Visit!")
-                        st.rerun()
-                with b_c2:
-                    if st.button("📞 Contacted", key=f"cnt_{lid}"):
-                        sc.update_supabase_lead_status(lid, "contacted", "Connected")
-                        st.toast(f"Updated {name} to Contacted!")
-                        st.rerun()
-                with b_c3:
-                    if st.button("🎉 Converted", key=f"cnv_{lid}"):
-                        sc.update_supabase_lead_status(lid, "converted", "Converted")
-                        st.toast(f"Congratulations! {name} converted!")
-                        st.rerun()
-                with b_c4:
-                    if st.button("❌ Lost", key=f"lost_{lid}"):
-                        sc.update_supabase_lead_status(lid, "lost", "Not Interested")
-                        st.toast(f"Marked {name} as Lost.")
-                        st.rerun()
-                with b_c5:
-                    clean_phone = re.sub(r'\D', '', str(phone))
-                    wa_url = f"https://wa.me/91{clean_phone[-10:]}?text=Namaste%20{name}%2C%20following%20up%20regarding%20your%20property%20enquiry."
-                    st.link_button("💬 WhatsApp", wa_url)
-                with b_c6:
-                    with st.popover("➕ Add Task"):
-                        t_date = st.date_input("Due Date", min_value=date.today(), key=f"t_d_{lid}")
-                        t_note = st.text_input("Task Note", value="Follow-up call on site visit", key=f"t_n_{lid}")
-                        if st.button("Save Task", key=f"save_t_{lid}"):
-                            sc.insert_supabase_follow_up(lid, t_date.isoformat(), t_note)
-                            st.success("Task scheduled in Supabase!")
+                    # 1-Tap Action Buttons
+                    b_c1, b_c2, b_c3, b_c4, b_c5, b_c6 = st.columns([1, 1, 1, 1, 1, 1.2])
+                    with b_c1:
+                        if st.button("📅 Site Visit", key=f"sv_{lid}"):
+                            sc.update_supabase_lead_status(lid, "site_visit", "Site Visit Booked")
+                            st.toast(f"Marked {name} for Site Visit!")
                             st.rerun()
+                    with b_c2:
+                        if st.button("📞 Contacted", key=f"cnt_{lid}"):
+                            sc.update_supabase_lead_status(lid, "contacted", "Connected")
+                            st.toast(f"Updated {name} to Contacted!")
+                            st.rerun()
+                    with b_c3:
+                        if st.button("🎉 Converted", key=f"cnv_{lid}"):
+                            sc.update_supabase_lead_status(lid, "converted", "Converted")
+                            st.toast(f"Congratulations! {name} converted!")
+                            st.rerun()
+                    with b_c4:
+                        if st.button("❌ Lost", key=f"lost_{lid}"):
+                            sc.update_supabase_lead_status(lid, "lost", "Not Interested")
+                            st.toast(f"Marked {name} as Lost.")
+                            st.rerun()
+                    with b_c5:
+                        clean_phone = re.sub(r'\D', '', str(phone))
+                        wa_url = f"https://wa.me/91{clean_phone[-10:]}?text=Namaste%20{name}%2C%20following%20up%20regarding%20your%20property%20enquiry."
+                        st.link_button("💬 WhatsApp", wa_url)
+                    with b_c6:
+                        with st.popover("➕ Add Task"):
+                            t_date = st.date_input("Due Date", min_value=date.today(), key=f"t_d_{lid}")
+                            t_note = st.text_input("Task Note", value="Follow-up call on site visit", key=f"t_n_{lid}")
+                            if st.button("Save Task", key=f"save_t_{lid}"):
+                                sc.insert_supabase_follow_up(lid, t_date.isoformat(), t_note)
+                                st.success("Task scheduled in Supabase!")
+                                st.rerun()
 
 
 # =======================================================================================

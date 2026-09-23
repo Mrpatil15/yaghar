@@ -11,20 +11,30 @@ from supabase import create_client, Client
 _client_instance: Optional[Client] = None
 
 def get_supabase_credentials() -> Tuple[str, str]:
-    """Retrieves Supabase URL and anon/service key from secrets or environment."""
+    """Retrieves Supabase URL and anon/service key from secrets, environment, or default cloud project."""
     url = ""
     key = ""
 
-    # 1. Try Streamlit secrets
+    # 0. Try session state (if user entered in UI)
     try:
-        if "SUPABASE_URL" in st.secrets:
-            url = str(st.secrets["SUPABASE_URL"]).strip()
-        if "SUPABASE_ANON_KEY" in st.secrets:
-            key = str(st.secrets["SUPABASE_ANON_KEY"]).strip()
-        elif "SUPABASE_KEY" in st.secrets:
-            key = str(st.secrets["SUPABASE_KEY"]).strip()
+        if "custom_supabase_url" in st.session_state and st.session_state.custom_supabase_url:
+            url = str(st.session_state.custom_supabase_url).strip()
+        if "custom_supabase_key" in st.session_state and st.session_state.custom_supabase_key:
+            key = str(st.session_state.custom_supabase_key).strip()
     except Exception:
         pass
+
+    # 1. Try Streamlit secrets
+    if not url or not key:
+        try:
+            if "SUPABASE_URL" in st.secrets:
+                url = str(st.secrets["SUPABASE_URL"]).strip()
+            if "SUPABASE_ANON_KEY" in st.secrets:
+                key = str(st.secrets["SUPABASE_ANON_KEY"]).strip()
+            elif "SUPABASE_KEY" in st.secrets:
+                key = str(st.secrets["SUPABASE_KEY"]).strip()
+        except Exception:
+            pass
 
     # 2. Try OS environment variables
     if not url:
@@ -60,6 +70,11 @@ def get_supabase_credentials() -> Tuple[str, str]:
                             key = line.split("=", 1)[1].strip().strip('"').strip("'")
             except Exception:
                 pass
+
+    # 5. Default project credentials for seamless Streamlit Cloud operation
+    if not url or not key:
+        url = "https://bbskftjdzwtvrmpbmskd.supabase.co"
+        key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJic2tmdGpkend0dnJtcGJtc2tkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODA1NjEsImV4cCI6MjEwNTU1NjU2MX0.Pf4L0jYlm1M6EEOqvDsJ_feAPnjBiJWVMJob3QHHv1w"
 
     return url, key
 
@@ -119,22 +134,48 @@ def get_active_workspace_id() -> str:
 
 # ----------------- Supabase Leads Service -----------------
 
-def fetch_supabase_leads(workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Fetches all leads live from Supabase, parsing score/tier transparently."""
+def fetch_supabase_leads(workspace_id: Optional[str] = None, max_records: int = 25000) -> List[Dict[str, Any]]:
+    """Fetches all leads live from Supabase (paginated beyond 1000 limit), parsing score/tier transparently. Falls back to SQLite."""
     client = get_supabase_client()
     if not client:
-        return []
+        try:
+            import database
+            return database.get_all_leads()
+        except Exception:
+            return []
 
     ws_id = workspace_id or get_active_workspace_id()
     try:
-        res = client.table("leads").select("*").eq("workspace_id", ws_id).order("created_at", desc=True).execute()
-        rows = res.data or []
-        
-        # Transparently parse score and tier from explicit columns or tags
-        for r in rows:
+        all_leads = []
+        page_size = 1000
+        start = 0
+
+        # PostgREST caps at 1000 rows by default; paginate to retrieve full dataset (e.g. 7900+ leads)
+        while start < max_records:
+            end = start + page_size - 1
+            res = client.table("leads").select("*").eq("workspace_id", ws_id).order("created_at", desc=True).range(start, end).execute()
+            rows = res.data or []
+            if not rows:
+                break
+            all_leads.extend(rows)
+            if len(rows) < page_size:
+                break
+            start += page_size
+
+        # If Supabase returned 0 leads, check if local SQLite has leads
+        if not all_leads:
+            try:
+                import database
+                sqlite_leads = database.get_all_leads()
+                if sqlite_leads:
+                    return sqlite_leads
+            except Exception:
+                pass
+
+        # Transparently parse score, tier, and call_status from explicit columns or tags
+        for r in all_leads:
             tags = r.get("tags") or []
             if r.get("score") is None:
-                # Look in tags
                 score_tag = next((t for t in tags if str(t).startswith("score:")), None)
                 if score_tag:
                     try:
@@ -152,29 +193,60 @@ def fetch_supabase_leads(workspace_id: Optional[str] = None) -> List[Dict[str, A
                 call_tag = next((t for t in tags if str(t).startswith("call:")), None)
                 r["call_status"] = call_tag.split(":", 1)[1] if call_tag else "Not Called"
 
-        return rows
+        return all_leads
     except Exception as e:
         print(f"[Supabase] fetch_supabase_leads error: {e}")
-        return []
+        try:
+            import database
+            return database.get_all_leads()
+        except Exception:
+            return []
 
 
-def insert_supabase_leads(leads_data: List[Dict[str, Any]], workspace_id: Optional[str] = None) -> int:
-    """Inserts a batch of leads directly into Supabase."""
-    client = get_supabase_client()
-    if not client or not leads_data:
+def insert_supabase_leads(leads_data: List[Dict[str, Any]], workspace_id: Optional[str] = None, progress_callback = None) -> int:
+    """Inserts a batch of leads directly into Supabase with progress updates and SQLite backup fallback."""
+    if not leads_data:
         return 0
 
+    client = get_supabase_client()
     ws_id = workspace_id or get_active_workspace_id()
-    records_to_insert = []
 
+    # If Supabase client is not available, immediately persist into local SQLite
+    if not client:
+        try:
+            import database
+            batch_records = []
+            for l in leads_data:
+                batch_records.append({
+                    "batch_id": 1,
+                    "name": l.get("name", "Unknown"),
+                    "phone": l.get("phone", ""),
+                    "raw_phone": l.get("raw_phone", l.get("phone", "")),
+                    "source": l.get("source", "Upload"),
+                    "enquiry_date": l.get("enquiry_date", ""),
+                    "raw_notes": l.get("notes") or l.get("raw_notes") or "",
+                    "cleaned_flag": 0 if l.get("is_dead") else 1,
+                    "flag_reason": "",
+                    "score": float(l.get("score") or 50.0),
+                    "tier": l.get("tier") or "Warm",
+                    "assigned_script": l.get("assigned_script", "")
+                })
+            count = database.insert_leads_bulk(batch_records)
+            if progress_callback:
+                progress_callback(count, len(leads_data))
+            return count
+        except Exception as ex:
+            print(f"[Fallback SQLite] insert error: {ex}")
+            return 0
+
+    records_to_insert = []
     for l in leads_data:
-        score = l.get("score") or 50.0
+        score = float(l.get("score") or 50.0)
         tier = l.get("tier") or ("Hot" if score >= 70 else ("Warm" if score >= 40 else "Cold"))
         call_status = l.get("call_status") or "Not Called"
 
         tags = list(l.get("tags") or [])
         tags.extend([f"tier:{tier}", f"score:{score}", f"call:{call_status}"])
-        # Dedupe tags
         tags = list(dict.fromkeys([str(t) for t in tags]))
 
         rec = {
@@ -192,7 +264,6 @@ def insert_supabase_leads(leads_data: List[Dict[str, Any]], workspace_id: Option
             "is_dead": bool(l.get("is_dead", False))
         }
 
-        # Attempt to include explicit columns if supported
         if "score" in l:
             rec["score"] = score
         if "tier" in l:
@@ -202,11 +273,12 @@ def insert_supabase_leads(leads_data: List[Dict[str, Any]], workspace_id: Option
 
         records_to_insert.append(rec)
 
-    # Insert in chunks of 100 for network efficiency
-    chunk_size = 100
+    # Insert in chunks of 250 for high throughput
+    chunk_size = 250
     inserted_count = 0
+    total_records = len(records_to_insert)
 
-    for i in range(0, len(records_to_insert), chunk_size):
+    for i in range(0, total_records, chunk_size):
         chunk = records_to_insert[i:i + chunk_size]
         try:
             res = client.table("leads").insert(chunk).execute()
@@ -229,11 +301,56 @@ def insert_supabase_leads(leads_data: List[Dict[str, Any]], workspace_id: Option
             else:
                 print(f"[Supabase] Chunk insert error: {e}")
 
+        if progress_callback:
+            try:
+                progress_callback(min(inserted_count, total_records), total_records)
+            except Exception:
+                pass
+
+    # Also mirror into local SQLite for offline redundancy
+    try:
+        import database
+        batch_records = []
+        for l in leads_data:
+            batch_records.append({
+                "batch_id": 1,
+                "name": l.get("name", "Unknown"),
+                "phone": l.get("phone", ""),
+                "raw_phone": l.get("raw_phone", l.get("phone", "")),
+                "source": l.get("source", "Upload"),
+                "enquiry_date": l.get("enquiry_date", ""),
+                "raw_notes": l.get("notes") or l.get("raw_notes") or "",
+                "cleaned_flag": 0 if l.get("is_dead") else 1,
+                "flag_reason": "",
+                "score": float(l.get("score") or 50.0),
+                "tier": l.get("tier") or "Warm",
+                "assigned_script": l.get("assigned_script", "")
+            })
+        database.insert_leads_bulk(batch_records)
+    except Exception:
+        pass
+
     return inserted_count
 
 
-def update_supabase_lead_status(lead_id: str, new_status: str, call_status: Optional[str] = None, notes: Optional[str] = None):
-    """Updates a lead's stage and call status live in Supabase."""
+def update_supabase_lead_status(lead_id: Any, new_status: str, call_status: Optional[str] = None, notes: Optional[str] = None):
+    """Updates a lead's stage and call status live in Supabase and SQLite."""
+    # Check if lead_id is an integer (from SQLite fallback)
+    is_sqlite_id = False
+    try:
+        if isinstance(lead_id, int) or (isinstance(lead_id, str) and lead_id.isdigit()):
+            is_sqlite_id = True
+    except Exception:
+        pass
+
+    if is_sqlite_id:
+        try:
+            import database
+            database.update_lead_call_outcome(int(lead_id), call_status or new_status, notes or "")
+            return True
+        except Exception as e:
+            print(f"[SQLite] update error: {e}")
+
     client = get_supabase_client()
     if not client:
         return False
@@ -244,7 +361,7 @@ def update_supabase_lead_status(lead_id: str, new_status: str, call_status: Opti
 
     try:
         # Fetch current tags to update call tag
-        curr = client.table("leads").select("tags").eq("id", lead_id).execute()
+        curr = client.table("leads").select("tags").eq("id", str(lead_id)).execute()
         if curr.data:
             existing_tags = curr.data[0].get("tags") or []
             updated_tags = [t for t in existing_tags if not str(t).startswith("call:")]
@@ -255,14 +372,14 @@ def update_supabase_lead_status(lead_id: str, new_status: str, call_status: Opti
         if call_status:
             update_payload["call_status"] = call_status
 
-        client.table("leads").update(update_payload).eq("id", lead_id).execute()
+        client.table("leads").update(update_payload).eq("id", str(lead_id)).execute()
         return True
     except Exception as e:
         # Fallback without call_status column if not yet added
         if "call_status" in update_payload:
             del update_payload["call_status"]
             try:
-                client.table("leads").update(update_payload).eq("id", lead_id).execute()
+                client.table("leads").update(update_payload).eq("id", str(lead_id)).execute()
                 return True
             except Exception:
                 pass
