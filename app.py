@@ -212,11 +212,23 @@ if "active_client_id" not in st.session_state:
     st.session_state.active_client_id = None
 if "active_batch_id" not in st.session_state:
     st.session_state.active_batch_id = None
+if "nav_radio" not in st.session_state:
+    st.session_state.nav_radio = "🏠 Follow-up Dashboard"
 
 # Ensure DB initialized
 db.init_db()
 
 # ----------------- Sidebar Navigation -----------------
+NAV_PAGES = [
+    "🏠 Follow-up Dashboard",
+    "📥 1. Client & Batch Intake",
+    "🧹 2. Cleaning & Standardization",
+    "🎯 3. Lead Scoring Engine",
+    "📜 4. Segmentation & Scripts",
+    "📦 5. Delivery Export & Calling",
+    "🧾 6. Non-GST Invoicing"
+]
+
 with st.sidebar:
     st.markdown("""
     <div style="padding: 10px 0 20px 0; text-align: center;">
@@ -230,15 +242,8 @@ with st.sidebar:
 
     nav_option = st.radio(
         "Navigation",
-        [
-            "🏠 Follow-up Dashboard",
-            "📥 1. Client & Batch Intake",
-            "🧹 2. Cleaning & Standardization",
-            "🎯 3. Lead Scoring Engine",
-            "📜 4. Segmentation & Scripts",
-            "📦 5. Delivery Export & Calling",
-            "🧾 6. Non-GST Invoicing"
-        ],
+        NAV_PAGES,
+        key="nav_radio",
         label_visibility="collapsed"
     )
 
@@ -408,7 +413,18 @@ if nav_option == "🏠 Follow-up Dashboard":
     st.subheader("📋 Client Batches & Follow-up Tracking")
     
     if not all_batches:
-        st.info("No batches found. Go to '1. Client & Batch Intake' to upload your first lead file or click 'Load Sample Demo Data' in the sidebar!")
+        st.markdown("""
+        <div style="background: #F8FAFC; border: 1.5px dashed #CBD5E1; border-radius: 12px; padding: 28px 24px; text-align: center; margin: 16px 0;">
+            <span style="font-size: 2.2rem;">📂</span>
+            <h3 style="color: #0F172A; margin: 8px 0 4px 0; font-weight: 700;">No Batches Found Yet</h3>
+            <p style="color: #64748B; font-size: 0.92rem; max-width: 520px; margin: 0 auto 16px auto;">
+                Ready to process a raw lead list (like <b>data_heawen.xlsx</b>)? Onboard your brokerage client and map your lead columns in <b>Step 1: Client & Batch Intake</b>.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🚀 Go to '1. Client & Batch Intake' to Upload Leads →", type="primary", use_container_width=True, key="dash_start_btn"):
+            st.session_state.nav_radio = "📥 1. Client & Batch Intake"
+            st.rerun()
     else:
         batch_rows = []
         today = date.today()
@@ -463,23 +479,26 @@ if nav_option == "🏠 Follow-up Dashboard":
 
     with col_reimport:
         st.subheader("📥 Sync Client Calling Feedback")
-        st.caption("Upload the client's returned Excel sheet to update conversion stats automatically.")
-        
-        target_batch_id = st.selectbox(
-            "Select Batch to Sync Feedback",
-            options=[b["id"] for b in all_batches] if all_batches else [],
-            format_func=lambda bid: f"#{bid} - {next((b['batch_name'] for b in all_batches if b['id']==bid), '')}"
-        )
-        
-        returned_file = st.file_uploader("Upload Client Returned Sheet (.xlsx / .csv)", type=["xlsx", "csv"], key="dash_returned")
-        if returned_file and target_batch_id:
-            if st.button("⚡ Process Client Feedback & Update Stats", type="primary"):
-                res = export.reimport_client_status_sheet(target_batch_id, returned_file)
-                if res["success"]:
-                    st.success(res["message"])
-                    st.rerun()
-                else:
-                    st.error(res["message"])
+        if not all_batches:
+            st.info("ℹ️ **Uploading a new raw lead file (e.g. data_heawen.xlsx)?**\n\nPlease go to **'📥 1. Client & Batch Intake'** in the left sidebar to onboard your client and map columns.\n\n*(This section is only used after your client returns their Excel sheet with completed call statuses)*")
+        else:
+            st.caption("Upload the client's returned Excel sheet to update conversion stats automatically.")
+            
+            target_batch_id = st.selectbox(
+                "Select Batch to Sync Feedback",
+                options=[b["id"] for b in all_batches],
+                format_func=lambda bid: f"#{bid} - {next((b['batch_name'] for b in all_batches if b['id']==bid), '')}"
+            )
+            
+            returned_file = st.file_uploader("Upload Client Returned Sheet (.xlsx / .csv)", type=["xlsx", "csv"], key="dash_returned")
+            if returned_file and target_batch_id:
+                if st.button("⚡ Process Client Feedback & Update Stats", type="primary"):
+                    res = export.reimport_client_status_sheet(target_batch_id, returned_file)
+                    if res["success"]:
+                        st.success(res["message"])
+                        st.rerun()
+                    else:
+                        st.error(res["message"])
 
     with col_notes:
         st.subheader("📝 Client Referral & Growth Notes")
